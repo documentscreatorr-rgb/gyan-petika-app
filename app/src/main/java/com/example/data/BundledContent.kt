@@ -11,7 +11,6 @@ object BundledContent {
   val classFilterPills =
     listOf(
       "All",
-      "Board Notice",
       "Study Material",
       "Question Papers",
       "Current Affairs",
@@ -20,7 +19,6 @@ object BundledContent {
   val searchFilterPills =
     listOf(
       "All",
-      "Board Notice",
       "Class 9",
       "Class 10",
       "Class 11",
@@ -41,7 +39,7 @@ object BundledContent {
       ClassHubInfo(
         id = "class-10",
         className = "Class 10",
-        defaultBadge = "16 Live Notes",
+        defaultBadge = "Board Prep",
         subtitle = "Board Exam Preparation",
       ),
       ClassHubInfo(

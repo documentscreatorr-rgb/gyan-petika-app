@@ -99,11 +99,11 @@ private val PaperColors =
   lightColorScheme(
     primary = PrimaryNavy,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFEDE4D3),
+    primaryContainer = Color(0xFFEFE8DA),
     onPrimaryContainer = PaperTextPrimary,
     secondary = AccentGold,
     onSecondary = PrimaryNavyDark,
-    secondaryContainer = Color(0xFFF5E6C4),
+    secondaryContainer = Color(0xFFF3EAD6),
     onSecondaryContainer = Color(0xFF69480A),
     tertiary = BadgePurple,
     onTertiary = Color.White,
@@ -111,10 +111,10 @@ private val PaperColors =
     onBackground = PaperTextPrimary,
     surface = PaperSurface,
     onSurface = PaperTextPrimary,
-    surfaceVariant = Color(0xFFEFE6D8),
+    surfaceVariant = Color(0xFFF3EEE3),
     onSurfaceVariant = PaperTextSecondary,
     outline = PaperBorder,
-    outlineVariant = Color(0xFFD8CBB5),
+    outlineVariant = Color(0xFFDCD5C7),
     error = BadgeRed,
   )
 
@@ -158,21 +158,21 @@ fun GyanPetikaTheme(
       readerBackground =
         when {
           eyeComfortPaperMode && !isDark -> PaperBackground
-          eyeComfortPaperMode && isDark -> Color(0xFF1F1B16)
+          eyeComfortPaperMode && isDark -> Color(0xFF201B16)
           isDark -> BackgroundDark
           else -> BackgroundLight
         },
       readerSurface =
         when {
           eyeComfortPaperMode && !isDark -> PaperSurface
-          eyeComfortPaperMode && isDark -> Color(0xFF28221B)
+          eyeComfortPaperMode && isDark -> Color(0xFF2A231C)
           isDark -> SurfaceDark
           else -> SurfaceWhite
         },
       readerBorder =
         when {
           eyeComfortPaperMode && !isDark -> PaperBorder
-          eyeComfortPaperMode && isDark -> Color(0xFF3D3329)
+          eyeComfortPaperMode && isDark -> Color(0xFF3F352B)
           isDark -> BorderDark
           else -> BorderLight
         },

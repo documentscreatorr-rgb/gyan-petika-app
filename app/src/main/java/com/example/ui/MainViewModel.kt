@@ -73,11 +73,14 @@ data class MainUiState(
     if (labelOrTitleMatch) return true
 
     return when {
-      filter.equals("Board Notice", ignoreCase = true) ->
-        post.labels.any { it.contains("notice", ignoreCase = true) || it.contains("circular", ignoreCase = true) } ||
+      filter.equals("Notice", ignoreCase = true) || filter.equals("Board Notice", ignoreCase = true) ->
+        post.classTag.equals("Notice", ignoreCase = true) ||
+          post.classTag.equals("Board Notice", ignoreCase = true) ||
+          post.labels.any { it.contains("notice", ignoreCase = true) || it.contains("circular", ignoreCase = true) } ||
           post.title.contains("board notice", ignoreCase = true) ||
           post.title.contains("cbse notice", ignoreCase = true) ||
-          post.title.contains("date sheet", ignoreCase = true)
+          post.title.contains("date sheet", ignoreCase = true) ||
+          Regex("\\bnotices?\\b", RegexOption.IGNORE_CASE).containsMatchIn(post.title)
       filter.equals("Question Papers", ignoreCase = true) ->
         post.materialCategory.contains("Question Paper", ignoreCase = true) ||
           post.labels.any {
@@ -92,6 +95,14 @@ data class MainUiState(
       else -> false
     }
   }
+
+  val noticePosts: List<StudyPost>
+    get() =
+      posts.filter { post ->
+        post.labels.any { label ->
+          label.trim().equals("Notice", ignoreCase = true)
+        }
+      }
 
   val savedPosts: List<StudyPost>
     get() = posts.filter { it.id in preferences.savedPostIds }

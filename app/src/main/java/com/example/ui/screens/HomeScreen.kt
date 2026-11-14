@@ -23,11 +23,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.School
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -39,7 +39,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -56,13 +55,10 @@ import com.example.ui.MainUiState
 import com.example.ui.components.GyanBrandHeader
 import com.example.ui.components.SearchTriggerCard
 import com.example.ui.components.StudyPostRowCard
-import com.example.ui.theme.AccentGold
 import com.example.ui.theme.BadgeGreen
 import com.example.ui.theme.BadgePurple
 import com.example.ui.theme.LocalGyanExtendedColors
 import com.example.ui.theme.PrimaryNavy
-import com.example.ui.theme.PrimaryNavyDark
-import com.example.ui.theme.PrimaryNavyLight
 
 @Composable
 fun HomeScreen(
@@ -70,8 +66,8 @@ fun HomeScreen(
   onSettingsClick: () -> Unit,
   onSearchClick: () -> Unit,
   onSelectClassPill: (String) -> Unit,
-  onExploreItNotesClick: () -> Unit,
   onOpenClassHub: (String) -> Unit,
+  onViewAllNoticesClick: () -> Unit,
   onOpenPost: (StudyPost) -> Unit,
   onToggleBookmark: (String) -> Unit,
   onSyncFeed: () -> Unit,
@@ -133,13 +129,6 @@ fun HomeScreen(
 
     if (isHomeOverview) {
       item {
-        FeaturedHeroCard(
-          onExploreClick = onExploreItNotesClick,
-          modifier = Modifier.padding(horizontal = 16.dp),
-        )
-      }
-
-      item {
         Column(modifier = Modifier.padding(horizontal = 16.dp)) {
           Text(
             text = stringResource(R.string.explore_by_class),
@@ -148,9 +137,6 @@ fun HomeScreen(
           )
           Spacer(modifier = Modifier.height(10.dp))
           val classes = BundledContent.exploreByClass
-          val c9Count = uiState.countForClass(classes[0].className)
-          val c11Count = uiState.countForClass(classes[2].className)
-          val c12Count = uiState.countForClass(classes[3].className)
 
           Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(
@@ -159,14 +145,14 @@ fun HomeScreen(
             ) {
               ClassGridCard(
                 info = classes[0],
-                badgeText = if (c9Count > 0) "$c9Count Live Notes" else classes[0].defaultBadge,
+                badgeText = classes[0].defaultBadge,
                 badgeColor = PrimaryNavy,
                 onClick = { onOpenClassHub(classes[0].className) },
                 modifier = Modifier.weight(1f),
               )
               ClassGridCard(
                 info = classes[1],
-                badgeText = "${uiState.class10Count} Live Notes",
+                badgeText = classes[1].defaultBadge,
                 badgeColor = BadgeGreen,
                 onClick = { onOpenClassHub(classes[1].className) },
                 modifier = Modifier.weight(1f),
@@ -178,14 +164,14 @@ fun HomeScreen(
             ) {
               ClassGridCard(
                 info = classes[2],
-                badgeText = if (c11Count > 0) "$c11Count Live Notes" else classes[2].defaultBadge,
+                badgeText = classes[2].defaultBadge,
                 badgeColor = BadgePurple,
                 onClick = { onOpenClassHub(classes[2].className) },
                 modifier = Modifier.weight(1f),
               )
               ClassGridCard(
                 info = classes[3],
-                badgeText = if (c12Count > 0) "$c12Count Live Notes" else classes[3].defaultBadge,
+                badgeText = classes[3].defaultBadge,
                 badgeColor = Color(0xFFEA580C),
                 onClick = { onOpenClassHub(classes[3].className) },
                 modifier = Modifier.weight(1f),
@@ -193,6 +179,15 @@ fun HomeScreen(
             }
           }
         }
+      }
+
+      item {
+        HomeNoticeSection(
+          allNotices = uiState.noticePosts,
+          onOpenNotice = onOpenPost,
+          onViewAllClick = onViewAllNoticesClick,
+          modifier = Modifier.padding(horizontal = 16.dp),
+        )
       }
 
       item {
@@ -319,6 +314,175 @@ fun HomeScreen(
 }
 
 @Composable
+private fun HomeNoticeSection(
+  allNotices: List<StudyPost>,
+  onOpenNotice: (StudyPost) -> Unit,
+  onViewAllClick: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  val extended = LocalGyanExtendedColors.current
+  val recentNotices = allNotices.take(5)
+
+  Column(modifier = modifier.fillMaxWidth()) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+          modifier =
+            Modifier.size(30.dp)
+              .clip(RoundedCornerShape(9.dp))
+              .background(Color(0xFFEA580C).copy(alpha = 0.14f)),
+          contentAlignment = Alignment.Center,
+        ) {
+          Icon(
+            imageVector = Icons.Rounded.NotificationsActive,
+            contentDescription = null,
+            tint = Color(0xFFEA580C),
+            modifier = Modifier.size(17.dp),
+          )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+          text = stringResource(R.string.notice_section_title),
+          style = MaterialTheme.typography.titleLarge,
+          color = MaterialTheme.colorScheme.onBackground,
+        )
+      }
+      if (allNotices.isNotEmpty()) {
+        Surface(
+          shape = RoundedCornerShape(999.dp),
+          color = Color(0xFFEA580C).copy(alpha = 0.12f),
+        ) {
+          Text(
+            text = "${allNotices.size} Notices",
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+            color = Color(0xFFEA580C),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+          )
+        }
+      }
+    }
+
+    Spacer(modifier = Modifier.height(10.dp))
+
+    Surface(
+      shape = RoundedCornerShape(18.dp),
+      color = MaterialTheme.colorScheme.surface,
+      border = BorderStroke(1.dp, extended.border),
+      modifier = Modifier.fillMaxWidth().testTag("home_notice_card"),
+    ) {
+      if (recentNotices.isEmpty()) {
+        Box(
+          modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp, horizontal = 16.dp),
+          contentAlignment = Alignment.Center,
+        ) {
+          Text(
+            text = stringResource(R.string.no_notice_yet),
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.testTag("home_no_notice_text"),
+          )
+        }
+      } else {
+        Column(modifier = Modifier.fillMaxWidth()) {
+          recentNotices.forEachIndexed { index, notice ->
+            Row(
+              modifier =
+                Modifier.fillMaxWidth()
+                  .minimumInteractiveComponentSize()
+                  .clickable { onOpenNotice(notice) }
+                  .padding(horizontal = 14.dp, vertical = 12.dp)
+                  .testTag("home_notice_item_$index"),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Box(
+                modifier =
+                  Modifier.size(26.dp)
+                    .clip(CircleShape)
+                    .background(PrimaryNavy.copy(alpha = if (extended.isDark) 0.35f else 0.10f)),
+                contentAlignment = Alignment.Center,
+              ) {
+                Text(
+                  text = "${index + 1}",
+                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                  color = if (extended.isDark) Color(0xFF93C5FD) else PrimaryNavy,
+                )
+              }
+              Spacer(modifier = Modifier.width(12.dp))
+              Column(modifier = Modifier.weight(1f)) {
+                Text(
+                  text = notice.title,
+                  style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                  color = MaterialTheme.colorScheme.onSurface,
+                  maxLines = 2,
+                  overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                  text = notice.publishedDate,
+                  style = MaterialTheme.typography.labelSmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+              }
+              Spacer(modifier = Modifier.width(8.dp))
+              Icon(
+                imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+              )
+            }
+            if (index < recentNotices.lastIndex) {
+              HorizontalDivider(
+                color = extended.border,
+                modifier = Modifier.padding(horizontal = 14.dp),
+              )
+            }
+          }
+        }
+      }
+    }
+
+    Spacer(modifier = Modifier.height(6.dp))
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.End,
+    ) {
+      Surface(
+        onClick = onViewAllClick,
+        shape = RoundedCornerShape(999.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, extended.border),
+        modifier = Modifier.minimumInteractiveComponentSize().testTag("notice_view_all_button"),
+      ) {
+        Row(
+          modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text(
+            text = stringResource(R.string.notice_view_all),
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.primary,
+          )
+          Spacer(modifier = Modifier.width(4.dp))
+          Icon(
+            imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(16.dp),
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
 private fun HomeCopyrightFooter(modifier: Modifier = Modifier) {
   val extended = LocalGyanExtendedColors.current
   Column(
@@ -340,89 +504,6 @@ private fun HomeCopyrightFooter(modifier: Modifier = Modifier) {
       color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
       textAlign = TextAlign.Center,
     )
-  }
-}
-
-@Composable
-private fun FeaturedHeroCard(
-  onExploreClick: () -> Unit,
-  modifier: Modifier = Modifier,
-) {
-  Box(
-    modifier =
-      modifier
-        .fillMaxWidth()
-        .clip(RoundedCornerShape(22.dp))
-        .background(
-          Brush.linearGradient(
-            colors = listOf(PrimaryNavyDark, PrimaryNavy, PrimaryNavyLight)
-          )
-        )
-        .padding(20.dp),
-  ) {
-    Column {
-      Surface(
-        shape = RoundedCornerShape(999.dp),
-        color = Color.White.copy(alpha = 0.14f),
-      ) {
-        Row(
-          modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Box(
-            modifier = Modifier.size(7.dp).clip(CircleShape).background(AccentGold)
-          )
-          Spacer(modifier = Modifier.width(6.dp))
-          Text(
-            text = stringResource(R.string.hero_badge),
-            style = MaterialTheme.typography.labelSmall,
-            color = AccentGold,
-            fontWeight = FontWeight.Bold,
-          )
-        }
-      }
-
-      Spacer(modifier = Modifier.height(12.dp))
-
-      Text(
-        text = stringResource(R.string.hero_title),
-        style = MaterialTheme.typography.headlineSmall.copy(fontSize = 20.sp, lineHeight = 26.sp),
-        color = Color.White,
-      )
-
-      Spacer(modifier = Modifier.height(8.dp))
-
-      Text(
-        text = stringResource(R.string.hero_description),
-        style = MaterialTheme.typography.bodyMedium,
-        color = Color.White.copy(alpha = 0.85f),
-      )
-
-      Spacer(modifier = Modifier.height(16.dp))
-
-      Button(
-        onClick = onExploreClick,
-        shape = RoundedCornerShape(12.dp),
-        colors =
-          ButtonDefaults.buttonColors(
-            containerColor = AccentGold,
-            contentColor = PrimaryNavyDark,
-          ),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        modifier = Modifier.minimumInteractiveComponentSize().testTag("explore_it_notes_cta"),
-      ) {
-        Text(
-          text = stringResource(R.string.hero_cta),
-          style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Icon(
-          imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
-          contentDescription = null,
-          modifier = Modifier.size(18.dp),
-        )
-      }
-    }
   }
 }
 

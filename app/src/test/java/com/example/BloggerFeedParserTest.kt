@@ -153,10 +153,11 @@ class BloggerFeedParserTest {
   }
 
   @Test
-  fun `top filter pills place Board Notice after All without class 9 to 12`() {
+  fun `top filter pills exclude Notice Board Notice and class 9 to 12`() {
     val pills = BundledContent.classFilterPills
-    assertEquals("All", pills[0])
-    assertEquals("Board Notice", pills[1])
+    assertEquals(listOf("All", "Study Material", "Question Papers", "Current Affairs"), pills)
+    assertFalse(pills.contains("Notice"))
+    assertFalse(pills.contains("Board Notice"))
     assertFalse(pills.contains("Class 9"))
     assertFalse(pills.contains("Class 10"))
     assertFalse(pills.contains("Class 11"))
@@ -215,5 +216,44 @@ class BloggerFeedParserTest {
         selectedClassFilter = "Study Material",
       )
     assertEquals(listOf("p-study-material"), state.recentFilteredPosts.map { it.id })
+  }
+
+  @Test
+  fun `noticePosts returns only exact Notice labelled posts ordered newest first for top 5`() {
+    val base =
+      StudyPost(
+        id = "base",
+        title = "Regular Notes",
+        classTag = "Class 10",
+        subjectTag = "Science",
+        categoryLabel = "Class 10 • Science",
+        subLabel = "Unit 1",
+        materialCategory = "Chapter-wise Notes",
+        publishedDate = "Nov 10, 2026",
+        fullPublishedDate = "Tuesday, November 10, 2026",
+        estimatedReadTime = "3 min read",
+        snippet = "Notes",
+        htmlContent = "<p>Notes</p>",
+        postUrl = "https://gyanpetika.blogspot.com/p/base",
+        labels = listOf("Class 10", "Study Material"),
+      )
+    val boardNoticeOnly =
+      base.copy(
+        id = "board-notice-only",
+        title = "Old Board Notice",
+        labels = listOf("Board Notice"),
+      )
+    val notices =
+      (1..7).map { idx ->
+        base.copy(
+          id = "notice-$idx",
+          title = "Notice #$idx",
+          labels = listOf("Notice"),
+        )
+      }
+    val state = MainUiState(posts = listOf(base, boardNoticeOnly) + notices)
+    assertEquals(7, state.noticePosts.size)
+    assertFalse(state.noticePosts.any { it.id == "board-notice-only" })
+    assertEquals(listOf("notice-1", "notice-2", "notice-3", "notice-4", "notice-5"), state.noticePosts.take(5).map { it.id })
   }
 }

@@ -65,6 +65,7 @@ import com.example.ui.screens.ArticleReaderScreen
 import com.example.ui.screens.CategoryPostsScreen
 import com.example.ui.screens.ClassHubScreen
 import com.example.ui.screens.HomeScreen
+import com.example.ui.screens.NoticesScreen
 import com.example.ui.screens.SavedScreen
 import com.example.ui.screens.SearchScreen
 import com.example.ui.screens.SettingsBottomSheet
@@ -77,6 +78,7 @@ private object Routes {
   const val SEARCH = "search"
   const val SAVED = "saved"
   const val CLASS_HUB = "class_hub/{className}"
+  const val NOTICES = "notices"
   const val SUBJECT_DETAIL = "subject_detail/{className}/{subjectName}"
   const val CATEGORY_POSTS = "category_posts/{className}/{subjectName}/{categoryTitle}"
   const val READER = "reader/{postId}"
@@ -266,15 +268,25 @@ private fun GyanPetikaApp(viewModel: MainViewModel) {
                 onSettingsClick = { showSettingsSheet = true },
                 onSearchClick = { navigateToTab(Routes.SEARCH) },
                 onSelectClassPill = viewModel::selectClassFilter,
-                onExploreItNotesClick = {
-                  navController.navigate(Routes.subjectDetail("Class 10", "Information Technology"))
-                },
                 onOpenClassHub = { className ->
                   navController.navigate(Routes.classHub(className))
+                },
+                onViewAllNoticesClick = {
+                  navController.navigate(Routes.NOTICES)
                 },
                 onOpenPost = ::openPost,
                 onToggleBookmark = viewModel::toggleBookmark,
                 onSyncFeed = { viewModel.syncFeed(silent = false) },
+              )
+            }
+
+            composable(Routes.NOTICES) {
+              NoticesScreen(
+                uiState = uiState,
+                onBackClick = { navController.popBackStack() },
+                onOpenPost = ::openPost,
+                onToggleBookmark = viewModel::toggleBookmark,
+                onAutoSync = { viewModel.syncFeed(silent = true) },
               )
             }
 
@@ -333,14 +345,10 @@ private fun GyanPetikaApp(viewModel: MainViewModel) {
                 className = className,
                 subjectName = subjectName,
                 allSubjectPosts = subjectPosts,
-                savedPostIds = uiState.preferences.savedPostIds,
-                density = uiState.preferences.listDensity,
                 onBackClick = { navController.popBackStack() },
                 onOpenCategory = { categoryTitle ->
                   navController.navigate(Routes.categoryPosts(className, subjectName, categoryTitle))
                 },
-                onOpenPost = ::openPost,
-                onToggleBookmark = viewModel::toggleBookmark,
               )
             }
 

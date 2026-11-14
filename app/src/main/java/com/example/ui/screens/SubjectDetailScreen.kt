@@ -57,16 +57,10 @@ fun SubjectDetailScreen(
   className: String,
   subjectName: String,
   allSubjectPosts: List<StudyPost>,
-  savedPostIds: Set<String>,
-  density: ListDensity,
   onBackClick: () -> Unit,
   onOpenCategory: (String) -> Unit,
-  onOpenPost: (StudyPost) -> Unit,
-  onToggleBookmark: (String) -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  val extended = LocalGyanExtendedColors.current
-
   LazyColumn(
     modifier = modifier.fillMaxSize(),
     contentPadding = PaddingValues(bottom = 28.dp),
@@ -166,60 +160,6 @@ fun SubjectDetailScreen(
         onClick = { onOpenCategory(category.title) },
         modifier = Modifier.padding(horizontal = 16.dp),
       )
-    }
-
-    if (allSubjectPosts.isNotEmpty()) {
-      item {
-        Text(
-          text = "Available $subjectName Notes",
-          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-          color = MaterialTheme.colorScheme.onBackground,
-          modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
-        )
-      }
-      items(allSubjectPosts, key = { it.id }) { post ->
-        StudyPostRowCard(
-          post = post,
-          isSaved = post.id in savedPostIds,
-          density = density,
-          onPostClick = { onOpenPost(post) },
-          onBookmarkToggle = { onToggleBookmark(post.id) },
-          modifier = Modifier.padding(horizontal = 16.dp),
-        )
-      }
-    } else {
-      item {
-        Surface(
-          shape = RoundedCornerShape(16.dp),
-          color = MaterialTheme.colorScheme.surface,
-          border = BorderStroke(1.dp, extended.border),
-          modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-        ) {
-          Column(
-            modifier = Modifier.padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-          ) {
-            Icon(
-              imageVector = Icons.Rounded.FolderOpen,
-              contentDescription = null,
-              tint = MaterialTheme.colorScheme.primary,
-              modifier = Modifier.size(34.dp),
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-              text = "No cached posts for $className $subjectName yet",
-              style = MaterialTheme.typography.titleSmall,
-              color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-              text = "Use Sync in Home or Settings to pull the latest blog updates.",
-              style = MaterialTheme.typography.bodySmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-          }
-        }
-      }
     }
   }
 }

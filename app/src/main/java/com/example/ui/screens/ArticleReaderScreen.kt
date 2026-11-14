@@ -359,8 +359,8 @@ fun ArticleReaderScreen(
           modifier =
             Modifier.matchParentSize()
               .background(
-                if (extended.isDark) Color(0x28FF8F00)
-                else Color(0x22FF9800)
+                if (extended.isDark) Color(0x12FFB74D)
+                else Color(0x0DFFB74D)
               )
               .testTag("eye_comfort_shield_overlay"),
         )
@@ -386,29 +386,29 @@ private fun FullPostHtmlWebView(
 
   val bgHex =
     when {
-      isPaperMode && !isDark -> "#F6ECD6"
-      isPaperMode && isDark -> "#241D15"
+      isPaperMode && !isDark -> "#FAF6EE"
+      isPaperMode && isDark -> "#201B16"
       isDark -> "#0B1220"
       else -> "#FFFFFF"
     }
   val textHex =
     when {
-      isPaperMode && !isDark -> "#2B2118"
+      isPaperMode && !isDark -> "#26211B"
       isPaperMode && isDark -> "#F3EAE0"
       isDark -> "#E2E8F0"
       else -> "#111827"
     }
   val cardBgHex =
     when {
-      isPaperMode && !isDark -> "#EFE2C6"
-      isPaperMode && isDark -> "#2E251B"
+      isPaperMode && !isDark -> "#F4EFE4"
+      isPaperMode && isDark -> "#2A231C"
       isDark -> "#131D2E"
       else -> "#F8FAFC"
     }
   val borderHex =
     when {
-      isPaperMode && !isDark -> "#DCCBB0"
-      isPaperMode && isDark -> "#44382B"
+      isPaperMode && !isDark -> "#E3DDD0"
+      isPaperMode && isDark -> "#3F352B"
       isDark -> "#25354E"
       else -> "#E2E8F0"
     }
@@ -597,7 +597,7 @@ private fun buildRichPostHtml(
         }
         body { padding: 10px 8px; }
         html.gp-eye-comfort #gp-post-root {
-          filter: sepia(0.18) brightness(0.97) contrast(0.98);
+          filter: sepia(0.06) brightness(0.985) contrast(0.98);
         }
         img, video, iframe {
           max-width: 100% !important;
