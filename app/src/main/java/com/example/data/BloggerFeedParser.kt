@@ -193,7 +193,8 @@ object BloggerFeedParser {
       combined.contains("board notice") -> "Board Notice"
       combined.contains("current affairs") -> "Current Affairs"
       combined.contains("question paper") -> "Question Papers"
-      else -> "Study Material"
+      labels.any { it.contains("study material", ignoreCase = true) } -> "Study Material"
+      else -> "General"
     }
   }
 
@@ -226,7 +227,7 @@ object BloggerFeedParser {
         return subject
       }
     }
-    return labels.firstOrNull() ?: "Study Material"
+    return labels.firstOrNull() ?: "General"
   }
 
   private fun detectMaterialCategory(labels: List<String>, title: String): String {

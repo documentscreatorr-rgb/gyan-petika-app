@@ -2,6 +2,8 @@ package com.example
 
 import com.example.data.BloggerFeedParser
 import com.example.data.BundledContent
+import com.example.data.StudyPost
+import com.example.ui.MainUiState
 import com.example.ui.components.ArticleBlock
 import com.example.ui.components.ArticleHtmlParser
 import com.example.ui.screens.buildPrintablePostHtml
@@ -159,5 +161,59 @@ class BloggerFeedParserTest {
     assertFalse(pills.contains("Class 10"))
     assertFalse(pills.contains("Class 11"))
     assertFalse(pills.contains("Class 12"))
+  }
+
+  @Test
+  fun `study material filter includes only posts labelled Study Material`() {
+    val unlabelledJson =
+      """
+      {
+        "feed": {
+          "entry": [
+            {
+              "id": {"${'$'}t": "post-unlabelled"},
+              "published": {"${'$'}t": "2026-11-13T10:00:00.000Z"},
+              "title": {"${'$'}t": "General Update"},
+              "content": {"${'$'}t": "<p>No labels here.</p>"}
+            }
+          ]
+        }
+      }
+      """
+        .trimIndent()
+    val parsedUnlabelled = BloggerFeedParser.parseFeedJson(unlabelledJson).first()
+    assertFalse(parsedUnlabelled.classTag.equals("Study Material", ignoreCase = true))
+    assertFalse(parsedUnlabelled.subjectTag.equals("Study Material", ignoreCase = true))
+
+    val class10OnlyPost =
+      StudyPost(
+        id = "p-class10",
+        title = "Class 10 Notes",
+        classTag = "Class 10",
+        subjectTag = "Information Technology",
+        categoryLabel = "Class 10 • IT",
+        subLabel = "Unit 1",
+        materialCategory = "Chapter-wise Notes",
+        publishedDate = "Nov 13, 2026",
+        fullPublishedDate = "Friday, November 13, 2026",
+        estimatedReadTime = "5 min read",
+        snippet = "Notes",
+        htmlContent = "<p>Notes</p>",
+        postUrl = "https://gyanpetika.blogspot.com/p/1",
+        labels = listOf("Class 10", "Information Technology"),
+      )
+    val studyMaterialPost =
+      class10OnlyPost.copy(
+        id = "p-study-material",
+        title = "Science Study Material",
+        labels = listOf("Class 10", "Study Material"),
+      )
+
+    val state =
+      MainUiState(
+        posts = listOf(parsedUnlabelled, class10OnlyPost, studyMaterialPost),
+        selectedClassFilter = "Study Material",
+      )
+    assertEquals(listOf("p-study-material"), state.recentFilteredPosts.map { it.id })
   }
 }

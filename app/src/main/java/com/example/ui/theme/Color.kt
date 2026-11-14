@@ -26,9 +26,9 @@ val TextPrimaryDark = Color(0xFFF1F5F9)
 val TextSecondaryDark = Color(0xFF94A3B8)
 
 // Eye-Comfort Paper Mode Tokens
-val PaperBackground = Color(0xFFFBF7F0)
-val PaperSurface = Color(0xFFF6EFE4)
-val PaperBorder = Color(0xFFE6DCCB)
+val PaperBackground = Color(0xFFF6ECD6)
+val PaperSurface = Color(0xFFEFE2C6)
+val PaperBorder = Color(0xFFDCCBB0)
 val PaperTextPrimary = Color(0xFF2B2118)
 val PaperTextSecondary = Color(0xFF6D5D4E)
 

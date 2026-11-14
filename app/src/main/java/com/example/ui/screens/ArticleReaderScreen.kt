@@ -149,14 +149,14 @@ fun ArticleReaderScreen(
       onShareClick = { shareStudyPost(context, post) },
     )
 
-    Column(
-      modifier =
-        Modifier.weight(1f)
-          .fillMaxWidth()
-          .verticalScroll(rememberScrollState())
-          .padding(horizontal = 8.dp, vertical = 8.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
+    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+      Column(
+        modifier =
+          Modifier.fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+      ) {
       // Metadata Header
       Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -353,6 +353,19 @@ fun ArticleReaderScreen(
 
       Spacer(modifier = Modifier.height(18.dp))
     }
+
+      if (extended.isPaperMode) {
+        Box(
+          modifier =
+            Modifier.matchParentSize()
+              .background(
+                if (extended.isDark) Color(0x28FF8F00)
+                else Color(0x22FF9800)
+              )
+              .testTag("eye_comfort_shield_overlay"),
+        )
+      }
+    }
   }
 }
 
@@ -373,8 +386,8 @@ private fun FullPostHtmlWebView(
 
   val bgHex =
     when {
-      isPaperMode && !isDark -> "#FBF7F0"
-      isPaperMode && isDark -> "#1F1B16"
+      isPaperMode && !isDark -> "#F6ECD6"
+      isPaperMode && isDark -> "#241D15"
       isDark -> "#0B1220"
       else -> "#FFFFFF"
     }
@@ -387,15 +400,15 @@ private fun FullPostHtmlWebView(
     }
   val cardBgHex =
     when {
-      isPaperMode && !isDark -> "#F6EFE4"
-      isPaperMode && isDark -> "#28221B"
+      isPaperMode && !isDark -> "#EFE2C6"
+      isPaperMode && isDark -> "#2E251B"
       isDark -> "#131D2E"
       else -> "#F8FAFC"
     }
   val borderHex =
     when {
-      isPaperMode && !isDark -> "#E6DCCB"
-      isPaperMode && isDark -> "#3D3329"
+      isPaperMode && !isDark -> "#DCCBB0"
+      isPaperMode && isDark -> "#44382B"
       isDark -> "#25354E"
       else -> "#E2E8F0"
     }
@@ -406,6 +419,7 @@ private fun FullPostHtmlWebView(
   val latestCardBgHex by rememberUpdatedState(cardBgHex)
   val latestBorderHex by rememberUpdatedState(borderHex)
   val latestIsDark by rememberUpdatedState(isDark)
+  val latestIsPaperMode by rememberUpdatedState(isPaperMode)
   val latestOnLabelClick by rememberUpdatedState(onLabelClick)
   val latestOnInternalPostLinkClick by rememberUpdatedState(onInternalPostLinkClick)
 
@@ -419,6 +433,7 @@ private fun FullPostHtmlWebView(
         cardBgHex = cardBgHex,
         borderHex = borderHex,
         isDark = isDark,
+        isPaperMode = isPaperMode,
       )
     }
 
@@ -504,7 +519,7 @@ private fun FullPostHtmlWebView(
               override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 val themeJs =
-                  "window.gpApplyTheme && window.gpApplyTheme($latestFontSizeSp, '$latestBgHex', '$latestTextHex', '$latestCardBgHex', '$latestBorderHex', $latestIsDark);"
+                  "window.gpApplyTheme && window.gpApplyTheme($latestFontSizeSp, '$latestBgHex', '$latestTextHex', '$latestCardBgHex', '$latestBorderHex', $latestIsDark, $latestIsPaperMode);"
                 view?.evaluateJavascript(themeJs, null)
                 view?.evaluateJavascript(
                   """
@@ -536,7 +551,7 @@ private fun FullPostHtmlWebView(
       update = { webView ->
         onWebViewReady(webView)
         val js =
-          "window.gpApplyTheme && window.gpApplyTheme($fontSizeSp, '$bgHex', '$textHex', '$cardBgHex', '$borderHex', $isDark);"
+          "window.gpApplyTheme && window.gpApplyTheme($fontSizeSp, '$bgHex', '$textHex', '$cardBgHex', '$borderHex', $isDark, $isPaperMode);"
         webView.evaluateJavascript(js, null)
       },
     )
@@ -551,10 +566,12 @@ private fun buildRichPostHtml(
   cardBgHex: String,
   borderHex: String,
   isDark: Boolean,
+  isPaperMode: Boolean,
 ): String {
+  val rootClass = if (isPaperMode) " class=\"gp-eye-comfort\"" else ""
   return """
     <!DOCTYPE html>
-    <html>
+    <html$rootClass>
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
@@ -579,6 +596,9 @@ private fun buildRichPostHtml(
           word-wrap: break-word;
         }
         body { padding: 10px 8px; }
+        html.gp-eye-comfort #gp-post-root {
+          filter: sepia(0.18) brightness(0.97) contrast(0.98);
+        }
         img, video, iframe {
           max-width: 100% !important;
           height: auto !important;
@@ -684,13 +704,18 @@ private fun buildRichPostHtml(
               window.GyanBridge.onHeightChanged(document.documentElement.scrollHeight);
             }
           }
-          window.gpApplyTheme = function(fontPx, bg, text, card, border, darkMode) {
+          window.gpApplyTheme = function(fontPx, bg, text, card, border, darkMode, paperMode) {
             var root = document.documentElement.style;
             root.setProperty('--gp-font-size', fontPx + 'px');
             root.setProperty('--gp-bg', bg);
             root.setProperty('--gp-text', text);
             root.setProperty('--gp-card', card);
             root.setProperty('--gp-border', border);
+            if (paperMode) {
+              document.documentElement.classList.add('gp-eye-comfort');
+            } else {
+              document.documentElement.classList.remove('gp-eye-comfort');
+            }
             document.querySelectorAll('a').forEach(function(a) {
               a.style.color = darkMode ? '#60A5FA' : '#0F345B';
             });
@@ -982,7 +1007,11 @@ private fun ReaderFloatingToolbar(
       Row(verticalAlignment = Alignment.CenterVertically) {
         IconButton(
           onClick = onTogglePaperMode,
-          modifier = Modifier.minimumInteractiveComponentSize().testTag("reader_paper_toggle"),
+          modifier =
+            Modifier.minimumInteractiveComponentSize()
+              .clip(CircleShape)
+              .background(if (isPaperMode) AccentGold.copy(alpha = 0.22f) else Color.Transparent)
+              .testTag("reader_paper_toggle"),
         ) {
           Icon(
             imageVector = Icons.Rounded.Contrast,

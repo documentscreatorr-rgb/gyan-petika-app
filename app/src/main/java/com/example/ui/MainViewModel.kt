@@ -57,6 +57,13 @@ data class MainUiState(
     }
 
   private fun matchesFilterPill(post: StudyPost, filter: String): Boolean {
+    if (filter.equals("Study Material", ignoreCase = true)) {
+      return post.labels.any {
+        it.equals("Study Material", ignoreCase = true) ||
+          it.contains("Study Material", ignoreCase = true)
+      }
+    }
+
     val labelOrTitleMatch =
       post.classTag.equals(filter, ignoreCase = true) ||
         post.subjectTag.equals(filter, ignoreCase = true) ||
@@ -71,11 +78,6 @@ data class MainUiState(
           post.title.contains("board notice", ignoreCase = true) ||
           post.title.contains("cbse notice", ignoreCase = true) ||
           post.title.contains("date sheet", ignoreCase = true)
-      filter.equals("Study Material", ignoreCase = true) ->
-        post.materialCategory in
-          listOf("Chapter-wise Notes", "NCERT Book and Solutions", "Important Questions", "MCQs Practice") &&
-          !post.classTag.equals("Current Affairs", ignoreCase = true) &&
-          !post.classTag.equals("Board Notice", ignoreCase = true)
       filter.equals("Question Papers", ignoreCase = true) ->
         post.materialCategory.contains("Question Paper", ignoreCase = true) ||
           post.labels.any {
