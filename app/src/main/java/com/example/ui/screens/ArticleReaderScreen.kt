@@ -1093,36 +1093,249 @@ private fun shareStudyPost(context: Context, post: StudyPost) {
   context.startActivity(Intent.createChooser(sendIntent, "Share Study Notes"))
 }
 
+private var activePrintWebView: WebView? = null
+
+@SuppressLint("SetJavaScriptEnabled")
 private fun printStudyPost(context: Context, post: StudyPost) {
-  val webView = WebView(context)
-  webView.webViewClient =
+  val printWebView = WebView(context)
+  activePrintWebView = printWebView
+  var printTriggered = false
+
+  fun triggerSystemPrint() {
+    if (printTriggered) return
+    printTriggered = true
+    val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager ?: return
+    val jobName = "GYAN PETIKA - ${post.title}"
+    val adapter = printWebView.createPrintDocumentAdapter(jobName)
+    printManager.print(jobName, adapter, PrintAttributes.Builder().build())
+  }
+
+  printWebView.settings.apply {
+    javaScriptEnabled = true
+    domStorageEnabled = true
+    loadsImagesAutomatically = true
+    useWideViewPort = true
+    loadWithOverviewMode = true
+    mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+  }
+
+  printWebView.addJavascriptInterface(
+    object {
+      @JavascriptInterface
+      fun onReadyToPrint() {
+        printWebView.post { triggerSystemPrint() }
+      }
+    },
+    "GyanPrintBridge",
+  )
+
+  printWebView.webViewClient =
     object : WebViewClient() {
       override fun onPageFinished(view: WebView?, url: String?) {
-        val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager ?: return
-        val jobName = "GYAN PETIKA - ${post.title}"
-        val adapter = webView.createPrintDocumentAdapter(jobName)
-        printManager.print(jobName, adapter, PrintAttributes.Builder().build())
+        super.onPageFinished(view, url)
+        printWebView.postDelayed({ triggerSystemPrint() }, 1500L)
       }
     }
-  val htmlDoc =
-    """
+
+  val htmlDoc = buildPrintablePostHtml(post.htmlContent)
+  printWebView.loadDataWithBaseURL(
+    BundledContent.BLOG_BASE_URL,
+    htmlDoc,
+    "text/html",
+    "UTF-8",
+    null,
+  )
+}
+
+internal fun buildPrintablePostHtml(rawHtml: String): String {
+  return """
     <!DOCTYPE html>
     <html>
     <head>
       <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <style>
-        body { font-family: sans-serif; color: #111827; padding: 24px; line-height: 1.6; }
-        h1 { color: #0F345B; font-size: 22px; margin-bottom: 6px; }
-        .meta { color: #6B7280; font-size: 13px; margin-bottom: 18px; }
+        :root {
+          --gp-bg: #FFFFFF;
+          --gp-text: #111827;
+          --gp-card: #F8FAFC;
+          --gp-border: #CBD5E1;
+          --gp-font-size: 14px;
+        }
+        * {
+          box-sizing: border-box;
+          max-width: 100%;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        html, body {
+          margin: 0;
+          padding: 0;
+          background: #FFFFFF !important;
+          color: #111827 !important;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          font-size: 14px;
+          line-height: 1.6;
+          word-wrap: break-word;
+        }
+        body { padding: 14px; }
+        img, video { max-width: 100% !important; height: auto !important; border-radius: 8px; }
+        iframe { max-width: 100% !important; }
+        a { color: #0F345B; font-weight: 600; text-decoration: none; }
+        h1, h2, h3, h4 { line-height: 1.35; margin-top: 1em; margin-bottom: 0.45em; break-after: avoid; page-break-after: avoid; }
+        p { margin: 0.55em 0; }
+        ul, ol { padding-left: 1.35em; margin: 0.5em 0; }
+        li { margin: 0.3em 0; }
+        table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 0.92em; }
+        th, td { border: 1px solid #CBD5E1; padding: 7px 9px; text-align: left; }
+        th { background: #F1F5F9; font-weight: 700; }
+        blockquote {
+          margin: 10px 0;
+          padding: 9px 12px;
+          border-left: 4px solid #F5B82E;
+          background: #F8FAFC;
+          border-radius: 0 8px 8px 0;
+        }
+        .gp-section {
+          margin: 12px 0;
+          padding: 12px;
+          border: 1px solid #CBD5E1;
+          border-radius: 12px;
+          background: #F8FAFC;
+        }
+        .gp-section::before {
+          content: attr(data-num);
+          display: inline-block;
+          background: #0F345B;
+          color: #F5B82E;
+          font-weight: 800;
+          font-size: 0.8em;
+          padding: 3px 9px;
+          border-radius: 7px;
+          margin-bottom: 6px;
+        }
+        .mcq-q {
+          color: #D32F2F !important;
+          font-weight: 700;
+          background: #FEF2F2;
+          padding: 9px 11px;
+          border-radius: 8px;
+          border: 1px solid #FECACA;
+          break-inside: avoid;
+          page-break-inside: avoid;
+        }
+        .mcq-a {
+          color: #2E7D32 !important;
+          font-weight: 600;
+          background: #F0FDF4;
+          padding: 9px 11px;
+          border-radius: 8px;
+          border: 1px solid #BBF7D0;
+          break-inside: avoid;
+          page-break-inside: avoid;
+        }
+        [class*="mcq" i], [id*="mcq" i], [class*="quiz" i], [id*="quiz" i] {
+          overflow: visible !important;
+          max-height: none !important;
+          height: auto !important;
+        }
+        details {
+          margin: 8px 0;
+          padding: 9px 11px;
+          border: 1px solid #CBD5E1;
+          border-radius: 8px;
+          background: #F8FAFC;
+        }
+        summary { font-weight: 700; }
+        button {
+          padding: 6px 12px;
+          border-radius: 7px;
+          border: 1px solid #94A3B8;
+          background: #F8FAFC;
+          color: #0F172A;
+          font-weight: 600;
+          margin: 3px 4px 3px 0;
+        }
+        @media print {
+          body { padding: 8px; background: #FFFFFF !important; }
+          details { display: block !important; }
+          details > * { display: block !important; }
+          [class*="mcq" i], [id*="mcq" i], [class*="quiz" i], [id*="quiz" i],
+          [class*="question" i], [class*="option" i], [class*="choice" i],
+          [class*="answer" i], [class*="solution" i], [class*="explanation" i] {
+            visibility: visible !important;
+            opacity: 1 !important;
+            max-height: none !important;
+            overflow: visible !important;
+          }
+          tr, blockquote, .mcq-q, .mcq-a {
+            break-inside: avoid;
+            page-break-inside: avoid;
+          }
+        }
       </style>
     </head>
     <body>
-      <h1>${post.title}</h1>
-      <div class="meta">${post.classTag} • ${post.subjectTag} • ${post.fullPublishedDate}</div>
-      ${post.htmlContent}
+      <div id="gp-print-root">$rawHtml</div>
+      <script>
+        (function() {
+          function prepareMcqsForPrint() {
+            document.querySelectorAll('details').forEach(function(d) {
+              d.open = true;
+              d.setAttribute('open', '');
+            });
+            var selectors = [
+              '[class*="mcq" i]',
+              '[id*="mcq" i]',
+              '[class*="quiz" i]',
+              '[id*="quiz" i]',
+              '[class*="answer" i]',
+              '[id*="answer" i]',
+              '[class*="ans" i]',
+              '[class*="solution" i]',
+              '[id*="solution" i]',
+              '[class*="explanation" i]',
+              '[class*="question" i]',
+              '[class*="option" i]',
+              '[class*="choice" i]',
+              '[data-answer]',
+              '[hidden]'
+            ].join(',');
+            document.querySelectorAll(selectors).forEach(function(el) {
+              el.removeAttribute('hidden');
+              el.removeAttribute('aria-hidden');
+              var cs = window.getComputedStyle(el);
+              if (cs.display === 'none') {
+                el.style.display = 'block';
+              }
+              if (cs.visibility === 'hidden') {
+                el.style.visibility = 'visible';
+              }
+              if (cs.opacity === '0') {
+                el.style.opacity = '1';
+              }
+              el.style.maxHeight = 'none';
+              el.style.overflow = 'visible';
+            });
+          }
+
+          function signalReady() {
+            prepareMcqsForPrint();
+            setTimeout(function() {
+              if (window.GyanPrintBridge) {
+                window.GyanPrintBridge.onReadyToPrint();
+              }
+            }, 250);
+          }
+
+          if (document.readyState === 'complete') {
+            signalReady();
+          } else {
+            window.addEventListener('load', signalReady);
+          }
+        })();
+      </script>
     </body>
     </html>
-    """
-      .trimIndent()
-  webView.loadDataWithBaseURL(BundledContent.BLOG_BASE_URL, htmlDoc, "text/html", "UTF-8", null)
+  """.trimIndent()
 }

@@ -4,7 +4,9 @@ import com.example.data.BloggerFeedParser
 import com.example.data.BundledContent
 import com.example.ui.components.ArticleBlock
 import com.example.ui.components.ArticleHtmlParser
+import com.example.ui.screens.buildPrintablePostHtml
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -102,5 +104,29 @@ class BloggerFeedParserTest {
     assertTrue(blocks.any { it is ArticleBlock.SectionHeaderBlock && it.number == "01" })
     assertTrue(blocks.any { it is ArticleBlock.McqQuestionBlock })
     assertTrue(blocks.any { it is ArticleBlock.McqAnswerBlock })
+  }
+
+  @Test
+  fun `printable post html excludes topic title header and includes whole post with mcq reveal`() {
+    val sample = BundledContent.fallbackPosts.first()
+    val printable = buildPrintablePostHtml(sample.htmlContent)
+
+    assertFalse(printable.contains("<h1>${sample.title}</h1>"))
+    assertFalse(printable.contains("<div class=\"meta\">"))
+    assertTrue(printable.contains(sample.htmlContent))
+    assertTrue(printable.contains("prepareMcqsForPrint"))
+    assertTrue(printable.contains(".mcq-q"))
+    assertTrue(printable.contains(".mcq-a"))
+  }
+
+  @Test
+  fun `top filter pills place Board Notice after All without class 9 to 12`() {
+    val pills = BundledContent.classFilterPills
+    assertEquals("All", pills[0])
+    assertEquals("Board Notice", pills[1])
+    assertFalse(pills.contains("Class 9"))
+    assertFalse(pills.contains("Class 10"))
+    assertFalse(pills.contains("Class 11"))
+    assertFalse(pills.contains("Class 12"))
   }
 }

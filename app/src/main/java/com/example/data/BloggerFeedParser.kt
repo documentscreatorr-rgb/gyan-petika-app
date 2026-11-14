@@ -190,6 +190,7 @@ object BloggerFeedParser {
       Regex("\\bclass\\s*9\\b|\\b9th\\b").containsMatchIn(combined) -> "Class 9"
       Regex("\\bclass\\s*11\\b|\\b11th\\b").containsMatchIn(combined) -> "Class 11"
       Regex("\\bclass\\s*12\\b|\\b12th\\b").containsMatchIn(combined) -> "Class 12"
+      combined.contains("board notice") -> "Board Notice"
       combined.contains("current affairs") -> "Current Affairs"
       combined.contains("question paper") -> "Question Papers"
       else -> "Study Material"
@@ -217,6 +218,7 @@ object BloggerFeedParser {
         "Geography" to listOf("geography"),
         "Psychology" to listOf("psychology"),
         "Sociology" to listOf("sociology"),
+        "Board Notice" to listOf("board notice", "board notices"),
         "Current Affairs" to listOf("current affairs"),
       )
     for ((subject, keywords) in orderedSubjects) {

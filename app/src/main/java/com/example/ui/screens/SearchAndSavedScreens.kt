@@ -115,7 +115,7 @@ fun SearchScreen(
         contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        items(BundledContent.classFilterPills) { pill ->
+        items(BundledContent.searchFilterPills) { pill ->
           val selected = uiState.searchClassFilter == pill
           Surface(
             onClick = { onClassFilterChange(pill) },

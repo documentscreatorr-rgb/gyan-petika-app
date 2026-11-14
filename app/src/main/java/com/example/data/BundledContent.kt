@@ -11,6 +11,16 @@ object BundledContent {
   val classFilterPills =
     listOf(
       "All",
+      "Board Notice",
+      "Study Material",
+      "Question Papers",
+      "Current Affairs",
+    )
+
+  val searchFilterPills =
+    listOf(
+      "All",
+      "Board Notice",
       "Class 9",
       "Class 10",
       "Class 11",

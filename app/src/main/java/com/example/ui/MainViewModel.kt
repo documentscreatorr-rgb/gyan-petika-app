@@ -37,6 +37,7 @@ data class MainUiState(
       } else {
         posts.filter { post ->
           post.classTag.equals(selectedClassFilter, ignoreCase = true) ||
+            post.subjectTag.equals(selectedClassFilter, ignoreCase = true) ||
             post.materialCategory.equals(selectedClassFilter, ignoreCase = true) ||
             post.labels.any { it.equals(selectedClassFilter, ignoreCase = true) || it.contains(selectedClassFilter, ignoreCase = true) }
         }
@@ -49,6 +50,7 @@ data class MainUiState(
         val classMatches =
           searchClassFilter == "All" ||
             post.classTag.equals(searchClassFilter, ignoreCase = true) ||
+            post.subjectTag.equals(searchClassFilter, ignoreCase = true) ||
             post.materialCategory.contains(searchClassFilter, ignoreCase = true) ||
             post.labels.any { it.equals(searchClassFilter, ignoreCase = true) || it.contains(searchClassFilter, ignoreCase = true) }
         val queryMatches =
