@@ -1,0 +1,321 @@
+{
+  "appMetadata": {
+    "appName": "GYAN PETIKA",
+    "tagline": "The Digital Box of Knowledge",
+    "portalSubtitle": "CBSE Education Portal",
+    "packageName": "com.gyanpetika.app",
+    "websiteUrl": "https://gyanpetika.blogspot.com",
+    "feedEndpoint": "https://gyanpetika.blogspot.com/feeds/posts/default?alt=json",
+    "standaloneModeLabel": "Running as Standalone App"
+  },
+  "designSystem": {
+    "colors": {
+      "primaryNavy": "#0F345B",
+      "accentGold": "#F5B82E",
+      "backgroundLight": "#F5F8FA",
+      "surfaceWhite": "#FFFFFF",
+      "textPrimary": "#111827",
+      "textSecondary": "#6B7280",
+      "badgeGreen": "#059669",
+      "badgePurple": "#7C3AED",
+      "badgeRed": "#DC2626",
+      "heroBannerGradient": [
+        "#4C1D95",
+        "#9333EA",
+        "#DB2777"
+      ],
+      "featuredCardGradient": [
+        "#0B2545",
+        "#134074"
+      ]
+    },
+    "typography": {
+      "defaultFontSizePx": 15,
+      "sizePresets": [
+        {
+          "label": "Small",
+          "sizePx": 13
+        },
+        {
+          "label": "Normal",
+          "sizePx": 15
+        },
+        {
+          "label": "Large",
+          "sizePx": 17
+        },
+        {
+          "label": "XL",
+          "sizePx": 19
+        }
+      ]
+    }
+  },
+  "navigation": {
+    "bottomTabs": [
+      {
+        "id": "home",
+        "label": "Home",
+        "icon": "home"
+      },
+      {
+        "id": "search",
+        "label": "Search",
+        "icon": "search"
+      },
+      {
+        "id": "saved",
+        "label": "Saved",
+        "icon": "bookmark"
+      }
+    ],
+    "classFilterPills": [
+      "All",
+      "Class 9",
+      "Class 10",
+      "Class 11",
+      "Class 12"
+    ]
+  },
+  "homeScreen": {
+    "searchPlaceholder": "Search notes, chapters, topics...",
+    "featuredHeroBanner": {
+      "badge": "Active Notes • CBSE Board Prep",
+      "title": "Class 10 Information Technology (Code 402)",
+      "description": "Complete chapter notes for Employability Skills & Digital Documentation with exam solutions.",
+      "ctaText": "Explore IT Study Notes",
+      "targetFilter": {
+        "class": "Class 10",
+        "subject": "Information Technology"
+      }
+    },
+    "exploreByClass": [
+      {
+        "id": "class-9",
+        "badge": "Foundation",
+        "title": "Class 9",
+        "subtitle": "Secondary Curriculum",
+        "ctaText": "Open"
+      },
+      {
+        "id": "class-10",
+        "badge": "16 Live Notes",
+        "title": "Class 10",
+        "subtitle": "Board Exam Preparation",
+        "ctaText": "Open"
+      },
+      {
+        "id": "class-11",
+        "badge": "Senior 11th",
+        "title": "Class 11",
+        "subtitle": "Science, Commerce &...",
+        "ctaText": "Open"
+      },
+      {
+        "id": "class-12",
+        "badge": "Board 12th",
+        "title": "Class 12",
+        "subtitle": "Science, Commerce &...",
+        "ctaText": "Open"
+      }
+    ],
+    "recentUpdates": [
+      {
+        "title": "Part B — Unit 4: Maintain Health, Safety and Secure Working Environment",
+        "category": "CBSE Class 10 IT (402)",
+        "subLabel": "Part B: Unit 4",
+        "publishedDate": "Nov 13, 2026"
+      },
+      {
+        "title": "Part B — Unit 3: Database Management System",
+        "category": "CBSE Class 10 IT (402)",
+        "subLabel": "Part B: Unit 3",
+        "publishedDate": "Nov 13, 2026"
+      },
+      {
+        "title": "Part B — Unit 2: Electronic Spreadsheet (Advanced)",
+        "category": "CBSE Class 10 IT (402)",
+        "subLabel": "Part B: Unit 2",
+        "publishedDate": "Nov 13, 2026"
+      },
+      {
+        "title": "Part B — Unit 1: Digital Documentation (Advanced)",
+        "category": "CBSE Class 10 IT (402)",
+        "subLabel": "Part B: Unit 1 Digital Documentation",
+        "publishedDate": "Nov 13, 2026"
+      },
+      {
+        "title": "Part - A : Employability skills - II",
+        "category": "CBSE Class 10 IT (402)",
+        "subLabel": "Part A",
+        "publishedDate": "Nov 13, 2026"
+      }
+    ]
+  },
+  "classHubScreen": {
+    "headerSubtitle": "CBSE Curriculum",
+    "promptText": "Choose a subject to explore",
+    "subjects": [
+      {
+        "id": "mathematics",
+        "name": "Mathematics",
+        "icon": "calculator",
+        "accent": "blue"
+      },
+      {
+        "id": "science",
+        "name": "Science",
+        "icon": "microscope",
+        "accent": "green"
+      },
+      {
+        "id": "english",
+        "name": "English",
+        "icon": "book-open",
+        "accent": "red"
+      },
+      {
+        "id": "hindi",
+        "name": "Hindi",
+        "icon": "book",
+        "accent": "orange"
+      },
+      {
+        "id": "social-science",
+        "name": "Social Science",
+        "icon": "globe",
+        "accent": "purple"
+      },
+      {
+        "id": "information-technology",
+        "name": "Information Technology",
+        "icon": "monitor",
+        "accent": "teal"
+      }
+    ]
+  },
+  "subjectDetailScreen": {
+    "allPostsCard": {
+      "title": "All Posts",
+      "subtitleTemplate": "Every {subject} post for {className}"
+    },
+    "studyMaterialCategories": [
+      {
+        "id": "chapter-notes",
+        "title": "Chapter-wise Notes",
+        "icon": "file-text"
+      },
+      {
+        "id": "ncert-solutions",
+        "title": "NCERT Book and Solutions",
+        "icon": "book-check"
+      },
+      {
+        "id": "important-questions",
+        "title": "Important Questions",
+        "icon": "help-circle"
+      },
+      {
+        "id": "pyq",
+        "title": "Previous Year Question Papers",
+        "icon": "file-spreadsheet"
+      },
+      {
+        "id": "mcq-practice",
+        "title": "MCQs Practice",
+        "icon": "check-square"
+      }
+    ]
+  },
+  "articleReaderScreen": {
+    "toolbarActions": [
+      "Back",
+      "FontDecrease (A)",
+      "FontIncrease (A+)",
+      "ThemeToggle",
+      "Bookmark",
+      "Print",
+      "Share"
+    ],
+    "metadataFields": [
+      "classTag",
+      "subjectTag",
+      "estimatedReadTime",
+      "publishedDate"
+    ],
+    "sampleArticle": {
+      "classTag": "Class 10",
+      "subjectTag": "Information Technology",
+      "estimatedReadTime": "11 min read",
+      "title": "Entrepreneurship Skill– II SESSION : 1 Entrepreneurship and its impact",
+      "publishedDate": "Thursday, November 5, 2026",
+      "banner": {
+        "eyebrow": "CBSE CLASS 10 IT • SUBJECT CODE 402",
+        "headline": "Entrepreneurship and Its Impact",
+        "subheadline": "Unit 4: Entrepreneurial Skills — Session 1",
+        "summary": "Comprehensive Master Notes, Societal & Economic Impact, Individual Benefits & Question Bank"
+      },
+      "sections": [
+        {
+          "number": "01",
+          "heading": "Introduction to Entrepreneurship",
+          "coreConcept": "Over the past few decades, our lifestyle and standard of living have changed tremendously. Modern appliances, rapid transport, digital communication, and automated services make everyday life easier."
+        }
+      ]
+    }
+  },
+  "settingsModal": {
+    "title": "Settings",
+    "subtitle": "Appearance, reading, offline & app tools",
+    "appearanceAndDisplay": {
+      "appTheme": {
+        "options": [
+          "Light",
+          "Dark",
+          "System"
+        ],
+        "default": "Light"
+      },
+      "listDensity": {
+        "options": [
+          "Comfortable",
+          "Compact"
+        ],
+        "default": "Comfortable"
+      }
+    },
+    "readingAndStudyPreferences": {
+      "notesTextSize": {
+        "options": [
+          "Small",
+          "Normal",
+          "Large",
+          "XL"
+        ],
+        "default": "Normal",
+        "defaultPx": 15,
+        "previewText": "Sample: Chapter notes and NCERT solutions will appear at this comfortable reading size."
+      },
+      "eyeComfortPaperMode": {
+        "description": "Warm paper tint while reading notes",
+        "default": false
+      }
+    },
+    "offlineAccessAndStorage": {
+      "autoCacheFeedOffline": {
+        "description": "Save latest study notes automatically for offline study",
+        "default": true
+      },
+      "cacheActions": [
+        "Sync Feed",
+        "Rebuild Cache"
+      ],
+      "savedBookmarksCount": 0
+    },
+    "appInstallation": {
+      "status": "Running as Standalone App",
+      "externalSiteLink": "https://gyanpetika.blogspot.com",
+      "resetDefaultsEnabled": true
+    }
+  }
+}

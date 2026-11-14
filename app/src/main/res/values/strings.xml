@@ -1,0 +1,30 @@
+<resources>
+    <string name="app_name">Gyan Petika</string>
+    <string name="brand_title">GYAN PETIKA</string>
+    <string name="brand_tagline">The Digital Box of Knowledge</string>
+    <string name="portal_subtitle">CBSE Education Portal</string>
+    <string name="search_placeholder">Search notes, chapters, topics…</string>
+    <string name="hero_badge">Active Notes • CBSE Board Prep</string>
+    <string name="hero_title">Class 10 Information Technology (Code 402)</string>
+    <string name="hero_description">Complete chapter notes for Employability Skills &amp; Digital Documentation with exam solutions.</string>
+    <string name="hero_cta">Explore IT Study Notes</string>
+    <string name="explore_by_class">Explore by Class</string>
+    <string name="recent_updates">Recent Updates</string>
+    <string name="nav_home">Home</string>
+    <string name="nav_search">Search</string>
+    <string name="nav_saved">Saved</string>
+    <string name="cd_app_logo">Gyan Petika emblem</string>
+    <string name="cd_settings">Open settings</string>
+    <string name="cd_back">Go back</string>
+    <string name="cd_bookmark">Toggle bookmark</string>
+    <string name="cd_share">Share study note</string>
+    <string name="cd_print">Print study note</string>
+    <string name="cd_font_decrease">Decrease text size</string>
+    <string name="cd_font_increase">Increase text size</string>
+    <string name="cd_paper_mode">Toggle Eye-Comfort Paper Mode</string>
+    <string name="settings_title">Settings</string>
+    <string name="settings_subtitle">Appearance, reading, offline &amp; app tools</string>
+    <string name="standalone_status">Running as Standalone App</string>
+    <string name="website_url">https://gyanpetika.blogspot.com</string>
+    <string name="sample_preview_text">Sample: Chapter notes and NCERT solutions will appear at this comfortable reading size.</string>
+</resources>
