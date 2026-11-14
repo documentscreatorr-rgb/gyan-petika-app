@@ -258,7 +258,7 @@ private fun GyanPetikaApp(viewModel: MainViewModel) {
           NavHost(
             navController = navController,
             startDestination = Routes.HOME,
-            modifier = Modifier.widthIn(max = 760.dp).fillMaxSize(),
+            modifier = Modifier.widthIn(max = 920.dp).fillMaxSize(),
           ) {
             composable(Routes.HOME) {
               HomeScreen(

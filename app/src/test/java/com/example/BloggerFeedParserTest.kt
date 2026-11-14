@@ -115,8 +115,39 @@ class BloggerFeedParserTest {
     assertFalse(printable.contains("<div class=\"meta\">"))
     assertTrue(printable.contains(sample.htmlContent))
     assertTrue(printable.contains("prepareMcqsForPrint"))
+    assertTrue(printable.contains("revealAnswerElements"))
+    assertTrue(printable.contains("gp-print-answer"))
+    assertTrue(printable.contains("data-gp-print-state=\"wrong\""))
+    assertTrue(printable.contains("data-gp-print-state=\"correct\""))
+    assertTrue(printable.contains("data-gp-print-state=\"attempted\""))
     assertTrue(printable.contains(".mcq-q"))
     assertTrue(printable.contains(".mcq-a"))
+  }
+
+  @Test
+  fun `printable post html preserves attempted snapshot without re-running snapshot scripts`() {
+    val liveSnapshot =
+      """
+      <div class="question">
+        <div class="option wrong" data-gp-print-state="wrong">Option A</div>
+        <div class="option correct" data-gp-print-state="correct">Option B</div>
+      </div>
+      <script>renderQuiz();</script>
+      """.trimIndent()
+    val printable =
+      buildPrintablePostHtml(
+        rawHtml = liveSnapshot,
+        extraHeadStyles = "<style>.wrong{color:red;}</style>",
+        preserveAttemptedSnapshot = true,
+      )
+
+    assertTrue(printable.contains("id=\"gp-frozen-snapshot\""))
+    assertTrue(printable.contains("<style>.wrong{color:red;}</style>"))
+    assertTrue(printable.contains("restoreAttemptedSnapshotIfWiped"))
+    val templateSection = printable.substringAfter("id=\"gp-frozen-snapshot\">").substringBefore("</template>")
+    assertFalse(templateSection.contains("renderQuiz();"))
+    assertTrue(templateSection.contains("data-gp-print-state=\"wrong\""))
+    assertTrue(templateSection.contains("data-gp-print-state=\"correct\""))
   }
 
   @Test

@@ -35,12 +35,7 @@ data class MainUiState(
       if (selectedClassFilter == "All") {
         posts
       } else {
-        posts.filter { post ->
-          post.classTag.equals(selectedClassFilter, ignoreCase = true) ||
-            post.subjectTag.equals(selectedClassFilter, ignoreCase = true) ||
-            post.materialCategory.equals(selectedClassFilter, ignoreCase = true) ||
-            post.labels.any { it.equals(selectedClassFilter, ignoreCase = true) || it.contains(selectedClassFilter, ignoreCase = true) }
-        }
+        posts.filter { post -> matchesFilterPill(post, selectedClassFilter) }
       }
 
   val searchResults: List<StudyPost>
@@ -48,11 +43,7 @@ data class MainUiState(
       val q = searchQuery.trim().lowercase()
       return posts.filter { post ->
         val classMatches =
-          searchClassFilter == "All" ||
-            post.classTag.equals(searchClassFilter, ignoreCase = true) ||
-            post.subjectTag.equals(searchClassFilter, ignoreCase = true) ||
-            post.materialCategory.contains(searchClassFilter, ignoreCase = true) ||
-            post.labels.any { it.equals(searchClassFilter, ignoreCase = true) || it.contains(searchClassFilter, ignoreCase = true) }
+          searchClassFilter == "All" || matchesFilterPill(post, searchClassFilter)
         val queryMatches =
           q.isBlank() ||
             post.title.lowercase().contains(q) ||
@@ -64,6 +55,41 @@ data class MainUiState(
         classMatches && queryMatches
       }
     }
+
+  private fun matchesFilterPill(post: StudyPost, filter: String): Boolean {
+    val labelOrTitleMatch =
+      post.classTag.equals(filter, ignoreCase = true) ||
+        post.subjectTag.equals(filter, ignoreCase = true) ||
+        post.materialCategory.equals(filter, ignoreCase = true) ||
+        post.labels.any { it.equals(filter, ignoreCase = true) || it.contains(filter, ignoreCase = true) }
+
+    if (labelOrTitleMatch) return true
+
+    return when {
+      filter.equals("Board Notice", ignoreCase = true) ->
+        post.labels.any { it.contains("notice", ignoreCase = true) || it.contains("circular", ignoreCase = true) } ||
+          post.title.contains("board notice", ignoreCase = true) ||
+          post.title.contains("cbse notice", ignoreCase = true) ||
+          post.title.contains("date sheet", ignoreCase = true)
+      filter.equals("Study Material", ignoreCase = true) ->
+        post.materialCategory in
+          listOf("Chapter-wise Notes", "NCERT Book and Solutions", "Important Questions", "MCQs Practice") &&
+          !post.classTag.equals("Current Affairs", ignoreCase = true) &&
+          !post.classTag.equals("Board Notice", ignoreCase = true)
+      filter.equals("Question Papers", ignoreCase = true) ->
+        post.materialCategory.contains("Question Paper", ignoreCase = true) ||
+          post.labels.any {
+            it.contains("question paper", ignoreCase = true) ||
+              it.contains("pyq", ignoreCase = true) ||
+              it.contains("sample paper", ignoreCase = true)
+          } ||
+          post.title.contains("question paper", ignoreCase = true) ||
+          post.title.contains("sample paper", ignoreCase = true)
+      filter.equals("Current Affairs", ignoreCase = true) ->
+        post.title.contains("current affairs", ignoreCase = true)
+      else -> false
+    }
+  }
 
   val savedPosts: List<StudyPost>
     get() = posts.filter { it.id in preferences.savedPostIds }

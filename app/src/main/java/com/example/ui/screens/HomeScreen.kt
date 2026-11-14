@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -76,6 +77,11 @@ fun HomeScreen(
 ) {
   val extended = LocalGyanExtendedColors.current
   val filteredPosts = uiState.recentFilteredPosts
+  val isHomeOverview = uiState.selectedClassFilter == "All"
+
+  BackHandler(enabled = !isHomeOverview) {
+    onSelectClassPill("All")
+  }
 
   LazyColumn(
     modifier = modifier.fillMaxSize(),
@@ -123,64 +129,66 @@ fun HomeScreen(
       }
     }
 
-    item {
-      FeaturedHeroCard(
-        onExploreClick = onExploreItNotesClick,
-        modifier = Modifier.padding(horizontal = 16.dp),
-      )
-    }
-
-    item {
-      Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-        Text(
-          text = stringResource(R.string.explore_by_class),
-          style = MaterialTheme.typography.titleLarge,
-          color = MaterialTheme.colorScheme.onBackground,
+    if (isHomeOverview) {
+      item {
+        FeaturedHeroCard(
+          onExploreClick = onExploreItNotesClick,
+          modifier = Modifier.padding(horizontal = 16.dp),
         )
-        Spacer(modifier = Modifier.height(10.dp))
-        val classes = BundledContent.exploreByClass
-        val c9Count = uiState.countForClass(classes[0].className)
-        val c11Count = uiState.countForClass(classes[2].className)
-        val c12Count = uiState.countForClass(classes[3].className)
+      }
 
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-          ) {
-            ClassGridCard(
-              info = classes[0],
-              badgeText = if (c9Count > 0) "$c9Count Live Notes" else classes[0].defaultBadge,
-              badgeColor = PrimaryNavy,
-              onClick = { onOpenClassHub(classes[0].className) },
-              modifier = Modifier.weight(1f),
-            )
-            ClassGridCard(
-              info = classes[1],
-              badgeText = "${uiState.class10Count} Live Notes",
-              badgeColor = BadgeGreen,
-              onClick = { onOpenClassHub(classes[1].className) },
-              modifier = Modifier.weight(1f),
-            )
-          }
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-          ) {
-            ClassGridCard(
-              info = classes[2],
-              badgeText = if (c11Count > 0) "$c11Count Live Notes" else classes[2].defaultBadge,
-              badgeColor = BadgePurple,
-              onClick = { onOpenClassHub(classes[2].className) },
-              modifier = Modifier.weight(1f),
-            )
-            ClassGridCard(
-              info = classes[3],
-              badgeText = if (c12Count > 0) "$c12Count Live Notes" else classes[3].defaultBadge,
-              badgeColor = Color(0xFFEA580C),
-              onClick = { onOpenClassHub(classes[3].className) },
-              modifier = Modifier.weight(1f),
-            )
+      item {
+        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+          Text(
+            text = stringResource(R.string.explore_by_class),
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+          )
+          Spacer(modifier = Modifier.height(10.dp))
+          val classes = BundledContent.exploreByClass
+          val c9Count = uiState.countForClass(classes[0].className)
+          val c11Count = uiState.countForClass(classes[2].className)
+          val c12Count = uiState.countForClass(classes[3].className)
+
+          Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+              ClassGridCard(
+                info = classes[0],
+                badgeText = if (c9Count > 0) "$c9Count Live Notes" else classes[0].defaultBadge,
+                badgeColor = PrimaryNavy,
+                onClick = { onOpenClassHub(classes[0].className) },
+                modifier = Modifier.weight(1f),
+              )
+              ClassGridCard(
+                info = classes[1],
+                badgeText = "${uiState.class10Count} Live Notes",
+                badgeColor = BadgeGreen,
+                onClick = { onOpenClassHub(classes[1].className) },
+                modifier = Modifier.weight(1f),
+              )
+            }
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+              ClassGridCard(
+                info = classes[2],
+                badgeText = if (c11Count > 0) "$c11Count Live Notes" else classes[2].defaultBadge,
+                badgeColor = BadgePurple,
+                onClick = { onOpenClassHub(classes[2].className) },
+                modifier = Modifier.weight(1f),
+              )
+              ClassGridCard(
+                info = classes[3],
+                badgeText = if (c12Count > 0) "$c12Count Live Notes" else classes[3].defaultBadge,
+                badgeColor = Color(0xFFEA580C),
+                onClick = { onOpenClassHub(classes[3].className) },
+                modifier = Modifier.weight(1f),
+              )
+            }
           }
         }
       }
@@ -194,7 +202,9 @@ fun HomeScreen(
       ) {
         Column(modifier = Modifier.weight(1f)) {
           Text(
-            text = stringResource(R.string.recent_updates),
+            text =
+              if (isHomeOverview) stringResource(R.string.recent_updates)
+              else uiState.selectedClassFilter,
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.onBackground,
           )
@@ -208,10 +218,14 @@ fun HomeScreen(
             Spacer(modifier = Modifier.width(4.dp))
             Text(
               text =
-                if (uiState.syncStatus.isLiveConnected) {
-                  "Live • gyanpetika.blogspot.com (${filteredPosts.size})"
+                if (isHomeOverview) {
+                  if (uiState.syncStatus.isLiveConnected) {
+                    "Live • gyanpetika.blogspot.com (${filteredPosts.size})"
+                  } else {
+                    "Offline cache • ${filteredPosts.size} notes"
+                  }
                 } else {
-                  "Offline cache • ${filteredPosts.size} notes"
+                  "${filteredPosts.size} posts & study files in ${uiState.selectedClassFilter}"
                 },
               style = MaterialTheme.typography.bodySmall,
               color =

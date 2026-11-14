@@ -1,10 +1,14 @@
 package com.example.ui.screens
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.graphics.Color as AndroidColor
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.print.PrintAttributes
 import android.print.PrintManager
 import android.view.ViewGroup
@@ -14,6 +18,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -55,6 +60,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -110,7 +116,17 @@ fun ArticleReaderScreen(
   val isSaved = post.id in preferences.savedPostIds
   val baseFontSp = preferences.customFontSizeSp
   var useFullPostView by rememberSaveable(post.id) { mutableStateOf(true) }
+  var activePostWebView by remember(post.id) { mutableStateOf<WebView?>(null) }
   val cleanBlocks = remember(post.id, post.htmlContent) { ArticleHtmlParser.parse(post) }
+
+  DisposableEffect(post.id, useFullPostView) {
+    if (!useFullPostView) {
+      activePostWebView = null
+    }
+    onDispose {
+      activePostWebView = null
+    }
+  }
 
   Column(
     modifier = modifier.fillMaxSize().background(extended.readerBackground),
@@ -118,13 +134,18 @@ fun ArticleReaderScreen(
     ReaderFloatingToolbar(
       isSaved = isSaved,
       isPaperMode = preferences.eyeComfortPaperMode,
-      fontSizeSp = baseFontSp,
       onBackClick = onBackClick,
       onFontDecrease = onFontDecrease,
       onFontIncrease = onFontIncrease,
       onTogglePaperMode = onTogglePaperMode,
       onToggleBookmark = onToggleBookmark,
-      onPrintClick = { printStudyPost(context, post) },
+      onPrintClick = {
+        printStudyPost(
+          context = context,
+          post = post,
+          liveWebView = if (useFullPostView) activePostWebView else null,
+        )
+      },
       onShareClick = { shareStudyPost(context, post) },
     )
 
@@ -133,8 +154,8 @@ fun ArticleReaderScreen(
         Modifier.weight(1f)
           .fillMaxWidth()
           .verticalScroll(rememberScrollState())
-          .padding(horizontal = 16.dp, vertical = 10.dp),
-      verticalArrangement = Arrangement.spacedBy(14.dp),
+          .padding(horizontal = 8.dp, vertical = 8.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
       // Metadata Header
       Column(modifier = Modifier.fillMaxWidth()) {
@@ -261,6 +282,7 @@ fun ArticleReaderScreen(
           isPaperMode = extended.isPaperMode,
           onLabelClick = onLabelClick,
           onInternalPostLinkClick = onInternalPostLinkClick,
+          onWebViewReady = { activePostWebView = it },
         )
       } else {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -343,6 +365,7 @@ private fun FullPostHtmlWebView(
   isPaperMode: Boolean,
   onLabelClick: (String) -> Unit,
   onInternalPostLinkClick: (String) -> Unit,
+  onWebViewReady: (WebView?) -> Unit,
 ) {
   val context = LocalContext.current
   val density = LocalDensity.current.density
@@ -463,7 +486,12 @@ private fun FullPostHtmlWebView(
                       return true
                     }
                   }
-                  if (url.contains("gyanpetika.blogspot.com") && !url.contains("/search") && !url.contains("#")) {
+                  if (
+                    url.contains("gyanpetika.blogspot.com") &&
+                      !url.contains("/search") &&
+                      !url.contains("#") &&
+                      !url.endsWith(".pdf", ignoreCase = true)
+                  ) {
                     latestOnInternalPostLinkClick(url)
                   } else {
                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
@@ -503,9 +531,10 @@ private fun FullPostHtmlWebView(
             "UTF-8",
             null,
           )
-        }
+        }.also { onWebViewReady(it) }
       },
       update = { webView ->
+        onWebViewReady(webView)
         val js =
           "window.gpApplyTheme && window.gpApplyTheme($fontSizeSp, '$bgHex', '$textHex', '$cardBgHex', '$borderHex', $isDark);"
         webView.evaluateJavascript(js, null)
@@ -529,7 +558,7 @@ private fun buildRichPostHtml(
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
-      <style>
+      <style id="gp-theme-style">
         :root {
           --gp-bg: $bgHex;
           --gp-text: $textHex;
@@ -549,7 +578,7 @@ private fun buildRichPostHtml(
           overflow-x: hidden;
           word-wrap: break-word;
         }
-        body { padding: 16px; }
+        body { padding: 10px 8px; }
         img, video, iframe {
           max-width: 100% !important;
           height: auto !important;
@@ -559,13 +588,13 @@ private fun buildRichPostHtml(
         a { color: ${if (isDark) "#60A5FA" else "#0F345B"}; font-weight: 600; }
         h1, h2, h3, h4 {
           line-height: 1.35;
-          margin-top: 1.1em;
-          margin-bottom: 0.5em;
+          margin-top: 1.05em;
+          margin-bottom: 0.45em;
         }
-        p { margin: 0.65em 0; }
-        ul, ol { padding-left: 1.35em; margin: 0.6em 0; }
+        p { margin: 0.6em 0; }
+        ul, ol { padding-left: 1.25em; margin: 0.55em 0; }
         li { margin: 0.35em 0; }
-        .gp-table-wrap { width: 100%; overflow-x: auto; margin: 12px 0; border-radius: 10px; }
+        .gp-table-wrap { width: 100%; overflow-x: auto; margin: 10px 0; border-radius: 10px; }
         table {
           width: 100%;
           border-collapse: collapse;
@@ -573,22 +602,22 @@ private fun buildRichPostHtml(
         }
         th, td {
           border: 1px solid var(--gp-border);
-          padding: 8px 10px;
+          padding: 7px 9px;
           text-align: left;
         }
         th { background: var(--gp-card); font-weight: 700; }
         blockquote {
-          margin: 12px 0;
-          padding: 10px 14px;
+          margin: 10px 0;
+          padding: 10px 12px;
           border-left: 4px solid #F5B82E;
           background: var(--gp-card);
           border-radius: 0 10px 10px 0;
         }
         .gp-section {
-          margin: 14px 0;
-          padding: 14px;
+          margin: 12px 0;
+          padding: 10px;
           border: 1px solid var(--gp-border);
-          border-radius: 14px;
+          border-radius: 12px;
           background: var(--gp-card);
         }
         .gp-section::before {
@@ -885,7 +914,6 @@ private fun RenderCleanBlock(
 private fun ReaderFloatingToolbar(
   isSaved: Boolean,
   isPaperMode: Boolean,
-  fontSizeSp: Int,
   onBackClick: () -> Unit,
   onFontDecrease: () -> Unit,
   onFontIncrease: () -> Unit,
@@ -900,10 +928,13 @@ private fun ReaderFloatingToolbar(
     color = extended.readerSurface,
     border = BorderStroke(1.dp, extended.readerBorder),
     tonalElevation = 2.dp,
-    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
   ) {
     Row(
-      modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+      modifier =
+        Modifier.fillMaxWidth()
+          .horizontalScroll(rememberScrollState())
+          .padding(horizontal = 4.dp, vertical = 2.dp),
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.SpaceBetween,
     ) {
@@ -929,10 +960,10 @@ private fun ReaderFloatingToolbar(
             text = "A-",
             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
             color = extended.readerTextPrimary,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
           )
         }
-        Spacer(modifier = Modifier.width(4.dp))
+        Spacer(modifier = Modifier.width(2.dp))
         Surface(
           onClick = onFontIncrease,
           shape = RoundedCornerShape(10.dp),
@@ -943,16 +974,9 @@ private fun ReaderFloatingToolbar(
             text = "A+",
             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
             color = extended.readerTextPrimary,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
           )
         }
-        Spacer(modifier = Modifier.width(4.dp))
-        Text(
-          text = "${fontSizeSp}px",
-          style = MaterialTheme.typography.labelSmall,
-          color = extended.readerTextSecondary,
-          modifier = Modifier.padding(horizontal = 4.dp),
-        )
       }
 
       Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1093,18 +1117,207 @@ private fun shareStudyPost(context: Context, post: StudyPost) {
   context.startActivity(Intent.createChooser(sendIntent, "Share Study Notes"))
 }
 
+private tailrec fun Context.findActivity(): Activity? =
+  when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+  }
+
 private var activePrintWebView: WebView? = null
 
+private const val CAPTURE_LIVE_DOM_JS =
+  """
+  (function() {
+    try {
+      var root = document.getElementById('gp-post-root');
+      if (!root) return { fallback: true };
+
+      // 1. Sync live form states so innerHTML preserves user selections
+      root.querySelectorAll('input').forEach(function(inp) {
+        var type = (inp.type || '').toLowerCase();
+        if (type === 'radio' || type === 'checkbox') {
+          if (inp.checked) inp.setAttribute('checked', 'checked');
+          else inp.removeAttribute('checked');
+        } else if (inp.value !== undefined && inp.value !== null) {
+          inp.setAttribute('value', inp.value);
+        }
+      });
+      root.querySelectorAll('textarea').forEach(function(ta) {
+        ta.textContent = ta.value || '';
+      });
+      root.querySelectorAll('option').forEach(function(opt) {
+        if (opt.selected) opt.setAttribute('selected', 'selected');
+        else opt.removeAttribute('selected');
+      });
+
+      // 2. Capture live attempted & corrected visual states from classes and computed colors
+      root.querySelectorAll('[data-gp-print-state]').forEach(function(el) {
+        el.removeAttribute('data-gp-print-state');
+      });
+
+      function parseRgb(str) {
+        if (!str || str === 'transparent') return null;
+        var m = str.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)/i);
+        if (!m) return null;
+        var a = m[4] !== undefined ? parseFloat(m[4]) : 1;
+        if (a < 0.12) return null;
+        return { r: parseInt(m[1], 10), g: parseInt(m[2], 10), b: parseInt(m[3], 10), a: a };
+      }
+      function isGreenColor(c) { return c && (c.g - c.r >= 18) && (c.g - c.b >= 14); }
+      function isRedColor(c) { return c && (c.r - c.g >= 26) && (c.r - c.b >= 26); }
+      function isBlueColor(c) { return c && (c.b - c.r >= 24) && (c.b - c.g >= 12); }
+
+      var hasAttempted = false;
+      function inspectAndTag(el) {
+        if (el.closest && el.closest('[data-gp-print-state]')) return;
+        var cls = (el.className && typeof el.className === 'string') ? el.className : '';
+        if (/\b(mcq-q|mcq-question|gp-section|gp-table-wrap)\b/i.test(cls)) return;
+        if (el.closest && el.closest('.mcq-q, .mcq-question')) return;
+        if (/^H[1-6]${'$'}/.test(el.tagName)) return;
+        // Skip large multi-option containers so we only highlight specific options/feedback
+        if (el.querySelectorAll && el.querySelectorAll('input[type="radio"], input[type="checkbox"]').length > 1) return;
+        if (el.querySelectorAll && el.querySelectorAll('.option, .opt, .choice').length > 1) return;
+        if (el.children && el.children.length > 5) return;
+
+        var lowerCls = ' ' + cls.toLowerCase() + ' ';
+        var state = null;
+        if (/\b(wrong|incorrect|is-wrong|ans-wrong|wrong-answer|option-wrong|user-wrong|btn-danger|alert-danger|error-opt)\b/.test(lowerCls)) {
+          state = 'wrong';
+        } else if (/\b(correct|right|is-correct|ans-correct|correct-answer|option-correct|mcq-a|btn-success|alert-success|true-ans)\b/.test(lowerCls)) {
+          state = 'correct';
+        } else if (/\b(selected|attempted|chosen|user-selected|user-answer|active-opt|active-option)\b/.test(lowerCls)) {
+          state = 'attempted';
+        }
+
+        if (!state) {
+          var cs = window.getComputedStyle(el);
+          if (cs.display === 'none' || cs.visibility === 'hidden') return;
+          var bg = parseRgb(cs.backgroundColor);
+          var fg = parseRgb(cs.color);
+          var bd = parseRgb(cs.borderTopColor) || parseRgb(cs.borderLeftColor);
+          var looksQuizEl = /\b(opt|option|choice|mcq|quiz|ans|answer|feedback|result|status|badge)\b/i.test(cls) ||
+            el.tagName === 'LABEL' || el.tagName === 'LI' || el.tagName === 'BUTTON' ||
+            !!el.querySelector('input[type="radio"], input[type="checkbox"]');
+          if (isGreenColor(bg) || isGreenColor(bd) || (looksQuizEl && isGreenColor(fg))) {
+            state = 'correct';
+          } else if (isRedColor(bg) || isRedColor(bd) || (looksQuizEl && isRedColor(fg))) {
+            state = 'wrong';
+          } else if (looksQuizEl && (isBlueColor(bg) || isBlueColor(bd))) {
+            if (el.tagName !== 'A' && !(el.tagName === 'BUTTON' && bg && bg.r < 30 && bg.g < 70)) {
+              state = 'attempted';
+            }
+          }
+        }
+
+        if (state) {
+          el.setAttribute('data-gp-print-state', state);
+          hasAttempted = true;
+        }
+      }
+
+      // Inspect outer option cards before inner spans so circular badges & icons stay untouched
+      root.querySelectorAll('button, li, label, div, p, td, a').forEach(inspectAndTag);
+      root.querySelectorAll('span').forEach(inspectAndTag);
+
+      root.querySelectorAll('input[type="radio"]:checked, input[type="checkbox"]:checked').forEach(function(inp) {
+        hasAttempted = true;
+        var wrap = inp.closest('label, li, .option, .opt, .choice, [class*="option" i], [class*="choice" i], p, div');
+        if (wrap && wrap.querySelectorAll('input[type="radio"], input[type="checkbox"]').length <= 1 && !wrap.getAttribute('data-gp-print-state')) {
+          wrap.setAttribute('data-gp-print-state', 'attempted');
+        }
+      });
+
+      var headStyles = '';
+      document.head.querySelectorAll('style').forEach(function(st) {
+        if (st.id !== 'gp-theme-style') {
+          headStyles += st.outerHTML + '\n';
+        }
+      });
+
+      return {
+        fallback: false,
+        headStyles: headStyles,
+        bodyHtml: root.innerHTML,
+        hasAttempted: hasAttempted
+      };
+    } catch (e) {
+      return { fallback: true, error: String(e) };
+    }
+  })();
+  """
+
 @SuppressLint("SetJavaScriptEnabled")
-private fun printStudyPost(context: Context, post: StudyPost) {
-  val printWebView = WebView(context)
+private fun printStudyPost(
+  context: Context,
+  post: StudyPost,
+  liveWebView: WebView? = null,
+) {
+  if (liveWebView != null) {
+    try {
+      liveWebView.evaluateJavascript(CAPTURE_LIVE_DOM_JS) { rawJson ->
+        val parsed =
+          runCatching {
+            if (rawJson.isNullOrBlank() || rawJson == "null") null else org.json.JSONObject(rawJson)
+          }.getOrNull()
+        val useFallback = parsed == null || parsed.optBoolean("fallback", true)
+        if (useFallback) {
+          launchPrintWebView(
+            context = context,
+            post = post,
+            rawHtml = post.htmlContent,
+            extraHeadStyles = "",
+            preserveAttemptedSnapshot = false,
+          )
+        } else {
+          launchPrintWebView(
+            context = context,
+            post = post,
+            rawHtml = parsed.optString("bodyHtml", post.htmlContent).ifBlank { post.htmlContent },
+            extraHeadStyles = parsed.optString("headStyles", ""),
+            preserveAttemptedSnapshot = parsed.optBoolean("hasAttempted", false),
+          )
+        }
+      }
+      return
+    } catch (_: Throwable) {
+      // Fall back cleanly to raw post HTML below
+    }
+  }
+
+  launchPrintWebView(
+    context = context,
+    post = post,
+    rawHtml = post.htmlContent,
+    extraHeadStyles = "",
+    preserveAttemptedSnapshot = false,
+  )
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+private fun launchPrintWebView(
+  context: Context,
+  post: StudyPost,
+  rawHtml: String,
+  extraHeadStyles: String,
+  preserveAttemptedSnapshot: Boolean,
+) {
+  val activity = context.findActivity() ?: context
+  val mainHandler = Handler(Looper.getMainLooper())
+  val printWebView = WebView(activity)
   activePrintWebView = printWebView
   var printTriggered = false
 
   fun triggerSystemPrint() {
     if (printTriggered) return
     printTriggered = true
-    val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager ?: return
+    val printManager =
+      (activity.getSystemService(Context.PRINT_SERVICE)
+        ?: context.getSystemService(Context.PRINT_SERVICE)) as? PrintManager
+    if (printManager == null) {
+      Toast.makeText(context, "Print service is unavailable on this device.", Toast.LENGTH_SHORT).show()
+      return
+    }
     val jobName = "GYAN PETIKA - ${post.title}"
     val adapter = printWebView.createPrintDocumentAdapter(jobName)
     printManager.print(jobName, adapter, PrintAttributes.Builder().build())
@@ -1114,30 +1327,26 @@ private fun printStudyPost(context: Context, post: StudyPost) {
     javaScriptEnabled = true
     domStorageEnabled = true
     loadsImagesAutomatically = true
-    useWideViewPort = true
-    loadWithOverviewMode = true
     mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
   }
-
-  printWebView.addJavascriptInterface(
-    object {
-      @JavascriptInterface
-      fun onReadyToPrint() {
-        printWebView.post { triggerSystemPrint() }
-      }
-    },
-    "GyanPrintBridge",
-  )
 
   printWebView.webViewClient =
     object : WebViewClient() {
       override fun onPageFinished(view: WebView?, url: String?) {
         super.onPageFinished(view, url)
-        printWebView.postDelayed({ triggerSystemPrint() }, 1500L)
+        view?.evaluateJavascript("window.gpPrepareMcqsForPrint && window.gpPrepareMcqsForPrint();") {
+          mainHandler.postDelayed({ triggerSystemPrint() }, 400L)
+        }
+        mainHandler.postDelayed({ triggerSystemPrint() }, 1200L)
       }
     }
 
-  val htmlDoc = buildPrintablePostHtml(post.htmlContent)
+  val htmlDoc =
+    buildPrintablePostHtml(
+      rawHtml = rawHtml,
+      extraHeadStyles = extraHeadStyles,
+      preserveAttemptedSnapshot = preserveAttemptedSnapshot,
+    )
   printWebView.loadDataWithBaseURL(
     BundledContent.BLOG_BASE_URL,
     htmlDoc,
@@ -1147,15 +1356,30 @@ private fun printStudyPost(context: Context, post: StudyPost) {
   )
 }
 
-internal fun buildPrintablePostHtml(rawHtml: String): String {
+private val SCRIPT_TAG_REGEX = Regex("(?is)<script\\b[^>]*>.*?</script>")
+
+internal fun buildPrintablePostHtml(
+  rawHtml: String,
+  extraHeadStyles: String = "",
+  preserveAttemptedSnapshot: Boolean = false,
+): String {
+  val frozenTemplateHtml =
+    if (preserveAttemptedSnapshot) {
+      val noScripts = SCRIPT_TAG_REGEX.replace(rawHtml, "")
+      "<template id=\"gp-frozen-snapshot\">$noScripts</template>"
+    } else {
+      ""
+    }
   return """
     <!DOCTYPE html>
     <html>
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      $extraHeadStyles
       <style>
         :root {
+          color-scheme: light;
           --gp-bg: #FFFFFF;
           --gp-text: #111827;
           --gp-card: #F8FAFC;
@@ -1166,6 +1390,7 @@ internal fun buildPrintablePostHtml(rawHtml: String): String {
           box-sizing: border-box;
           max-width: 100%;
           -webkit-print-color-adjust: exact !important;
+          color-adjust: exact !important;
           print-color-adjust: exact !important;
         }
         html, body {
@@ -1178,10 +1403,10 @@ internal fun buildPrintablePostHtml(rawHtml: String): String {
           line-height: 1.6;
           word-wrap: break-word;
         }
-        body { padding: 14px; }
+        body { padding: 10px; }
         img, video { max-width: 100% !important; height: auto !important; border-radius: 8px; }
         iframe { max-width: 100% !important; }
-        a { color: #0F345B; font-weight: 600; text-decoration: none; }
+        :where(a) { color: #0F345B; font-weight: 600; text-decoration: none; }
         h1, h2, h3, h4 { line-height: 1.35; margin-top: 1em; margin-bottom: 0.45em; break-after: avoid; page-break-after: avoid; }
         p { margin: 0.55em 0; }
         ul, ol { padding-left: 1.35em; margin: 0.5em 0; }
@@ -1215,26 +1440,57 @@ internal fun buildPrintablePostHtml(rawHtml: String): String {
           margin-bottom: 6px;
         }
         .mcq-q {
-          color: #D32F2F !important;
+          color: #B91C1C !important;
           font-weight: 700;
-          background: #FEF2F2;
+          background-color: #FEF2F2 !important;
           padding: 9px 11px;
           border-radius: 8px;
-          border: 1px solid #FECACA;
+          border: 1px solid #FECACA !important;
           break-inside: avoid;
           page-break-inside: avoid;
         }
-        .mcq-a {
-          color: #2E7D32 !important;
-          font-weight: 600;
-          background: #F0FDF4;
-          padding: 9px 11px;
+        /* Zero-specificity :where() fallbacks preserve native post badges, grids, and option styles */
+        :where(.selected, .attempted, .chosen, .user-selected, .user-answer, [data-gp-print-state="attempted"]) {
+          color: #1E3A8A;
+          font-weight: 700;
+          background-color: #DBEAFE;
+          border: 1.5px solid #3B82F6;
+          border-radius: 10px;
+        }
+        :where(.wrong, .incorrect, .is-wrong, .ans-wrong, .wrong-answer, .option-wrong, .btn-danger, .alert-danger, [data-gp-print-state="wrong"]) {
+          color: #991B1B;
+          font-weight: 700;
+          background-color: #FEE2E2;
+          border: 1.5px solid #EF4444;
+          border-radius: 10px;
+        }
+        :where(.mcq-a, .correct, .right, .is-correct, .ans-correct, .correct-answer, .option-correct, .btn-success, .alert-success, [data-correct="true" i], [data-correct="1"], [data-is-correct="true" i], [data-is-correct="1"], [data-right="true" i], [data-gp-print-state="correct"]) {
+          color: #14532D;
+          font-weight: 700;
+          background-color: #DCFCE7;
+          border: 1.5px solid #22C55E;
+          border-radius: 10px;
+        }
+        .gp-print-answer {
+          color: #14532D !important;
+          font-weight: 700 !important;
+          background-color: #DCFCE7 !important;
+          padding: 8px 11px;
           border-radius: 8px;
-          border: 1px solid #BBF7D0;
+          border: 1.5px solid #22C55E !important;
+          border-left: 5px solid #16A34A !important;
           break-inside: avoid;
           page-break-inside: avoid;
         }
-        [class*="mcq" i], [id*="mcq" i], [class*="quiz" i], [id*="quiz" i] {
+        input[type="radio"], input[type="checkbox"] {
+          accent-color: #0F345B !important;
+        }
+        input[type="radio"]:checked + label,
+        input[type="checkbox"]:checked + label {
+          font-weight: 700 !important;
+        }
+        [class*="mcq" i], [id*="mcq" i], [class*="quiz" i], [id*="quiz" i],
+        [class*="answer" i], [id*="answer" i], [class*="solution" i], [class*="explanation" i] {
           overflow: visible !important;
           max-height: none !important;
           height: auto !important;
@@ -1247,7 +1503,7 @@ internal fun buildPrintablePostHtml(rawHtml: String): String {
           background: #F8FAFC;
         }
         summary { font-weight: 700; }
-        button {
+        :where(button) {
           padding: 6px 12px;
           border-radius: 7px;
           border: 1px solid #94A3B8;
@@ -1257,18 +1513,24 @@ internal fun buildPrintablePostHtml(rawHtml: String): String {
           margin: 3px 4px 3px 0;
         }
         @media print {
-          body { padding: 8px; background: #FFFFFF !important; }
+          * {
+            -webkit-print-color-adjust: exact !important;
+            color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          body { padding: 6px; background: #FFFFFF !important; }
           details { display: block !important; }
           details > * { display: block !important; }
           [class*="mcq" i], [id*="mcq" i], [class*="quiz" i], [id*="quiz" i],
           [class*="question" i], [class*="option" i], [class*="choice" i],
-          [class*="answer" i], [class*="solution" i], [class*="explanation" i] {
-            visibility: visible !important;
-            opacity: 1 !important;
+          [class*="answer" i], [id*="answer" i], [class*="solution" i],
+          [class*="explanation" i], [class*="key" i], [class*="correct" i], [class*="wrong" i] {
             max-height: none !important;
+            height: auto !important;
             overflow: visible !important;
           }
-          tr, blockquote, .mcq-q, .mcq-a {
+          [data-gp-qcard="1"], tr, blockquote, .mcq-q, .mcq-a, .gp-print-answer,
+          [data-gp-print-state="correct"], [data-gp-print-state="wrong"], [data-gp-print-state="attempted"] {
             break-inside: avoid;
             page-break-inside: avoid;
           }
@@ -1277,62 +1539,209 @@ internal fun buildPrintablePostHtml(rawHtml: String): String {
     </head>
     <body>
       <div id="gp-print-root">$rawHtml</div>
+      $frozenTemplateHtml
       <script>
         (function() {
-          function prepareMcqsForPrint() {
-            document.querySelectorAll('details').forEach(function(d) {
+          function restoreAttemptedSnapshotIfWiped() {
+            var tpl = document.getElementById('gp-frozen-snapshot');
+            var root = document.getElementById('gp-print-root');
+            if (!tpl || !root) return;
+            var liveMarkers = root.querySelectorAll('[data-gp-print-state], input:checked').length;
+            var frozenMarkers = tpl.content ? tpl.content.querySelectorAll('[data-gp-print-state], input[checked]').length : 0;
+            if (frozenMarkers > 0 && liveMarkers === 0) {
+              root.innerHTML = tpl.innerHTML;
+            }
+          }
+
+          function syncCheckedProperties(root) {
+            root.querySelectorAll('input[checked]').forEach(function(inp) {
+              inp.checked = true;
+            });
+            root.querySelectorAll('option[selected]').forEach(function(opt) {
+              opt.selected = true;
+            });
+          }
+
+          function hasRevealedAnswer(container) {
+            if (!container) return false;
+            var found = container.querySelector(
+              '[data-gp-print-state="correct"], .correct, .right, .is-correct, .ans-correct, .correct-answer, .option-correct, .mcq-a, .gp-print-answer'
+            );
+            if (found) {
+              var cs = window.getComputedStyle(found);
+              if (cs.display !== 'none' && cs.visibility !== 'hidden') return true;
+            }
+            return false;
+          }
+
+          function hasAttemptedState(container) {
+            if (!container) return false;
+            return !!container.querySelector(
+              '[data-gp-print-state], .wrong, .incorrect, .correct, .right, .selected, .attempted, input:checked'
+            );
+          }
+
+          function revealAnswerElements() {
+            var root = document.getElementById('gp-print-root') || document.body;
+            root.querySelectorAll('details').forEach(function(d) {
               d.open = true;
               d.setAttribute('open', '');
             });
+
             var selectors = [
-              '[class*="mcq" i]',
-              '[id*="mcq" i]',
-              '[class*="quiz" i]',
-              '[id*="quiz" i]',
+              '[class="ans" i]',
+              '[class^="ans" i]',
+              '[class*=" ans" i]',
               '[class*="answer" i]',
               '[id*="answer" i]',
-              '[class*="ans" i]',
+              '[class*="mcq-a" i]',
+              '[class*="ans-" i]',
+              '[class*="-ans" i]',
+              '[class*="ans_" i]',
+              '[class*="_ans" i]',
+              '[id*="ans" i]',
               '[class*="solution" i]',
               '[id*="solution" i]',
+              '[class="sol" i]',
+              '[class^="sol" i]',
+              '[class*=" sol" i]',
               '[class*="explanation" i]',
-              '[class*="question" i]',
-              '[class*="option" i]',
-              '[class*="choice" i]',
+              '[id*="explanation" i]',
+              '[class*="key" i]',
+              '[id*="key" i]',
+              '[class*="reveal" i]',
               '[data-answer]',
-              '[hidden]'
+              '[data-ans]',
+              '[data-correct-answer]'
             ].join(',');
-            document.querySelectorAll(selectors).forEach(function(el) {
+
+            root.querySelectorAll(selectors).forEach(function(el) {
+              var tag = el.tagName;
+              if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'LINK' || tag === 'META' || tag === 'TEMPLATE') return;
+              var clsId = ((el.className || '') + ' ' + (el.id || '')).toLowerCase();
+              // Avoid unhiding hidden "Wrong! Try again" error templates unless attempted
+              if (/wrong|incorrect|try-again|error/.test(clsId) && !el.getAttribute('data-gp-print-state')) return;
+
               el.removeAttribute('hidden');
               el.removeAttribute('aria-hidden');
+              if (el.classList) {
+                el.classList.remove('d-none', 'hidden');
+                if (el.classList.contains('collapse')) {
+                  el.classList.add('show');
+                }
+              }
               var cs = window.getComputedStyle(el);
               if (cs.display === 'none') {
-                el.style.display = 'block';
+                var targetDisplay = (tag === 'SPAN' || tag === 'A' || tag === 'STRONG' || tag === 'B') ? 'inline-block' : 'block';
+                el.style.setProperty('display', targetDisplay, 'important');
               }
               if (cs.visibility === 'hidden') {
-                el.style.visibility = 'visible';
+                el.style.setProperty('visibility', 'visible', 'important');
               }
               if (cs.opacity === '0') {
-                el.style.opacity = '1';
+                el.style.setProperty('opacity', '1', 'important');
               }
-              el.style.maxHeight = 'none';
-              el.style.overflow = 'visible';
+              el.style.setProperty('max-height', 'none', 'important');
+              el.style.setProperty('height', 'auto', 'important');
+              el.style.setProperty('overflow', 'visible', 'important');
             });
           }
 
-          function signalReady() {
-            prepareMcqsForPrint();
-            setTimeout(function() {
-              if (window.GyanPrintBridge) {
-                window.GyanPrintBridge.onReadyToPrint();
+          function prepareMcqsForPrint() {
+            restoreAttemptedSnapshotIfWiped();
+            var root = document.getElementById('gp-print-root') || document.body;
+            syncCheckedProperties(root);
+
+            // 1. Click answer/solution/submit reveal buttons once when safe
+            var revealRegex = /(show|view|reveal|check|display|see|get|toggle|all)\s*(all\s*)?(the\s*)?(answer|answers|ans|solution|solutions|explanation|key|result|score)|^(answer|answers|ans|solution|solutions|answer key|show|reveal|check|submit|submit quiz|submit test|finish quiz)${'$'}/i;
+            var blockRegex = /hide|reset|clear|retry|restart|again|prev|next|back|home|share|print/i;
+            root.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"], .show-answer, .btn-answer, .submit-quiz').forEach(function(btn) {
+              if (btn.dataset && btn.dataset.gpClicked === '1') return;
+              if (btn.tagName === 'A') {
+                var href = (btn.getAttribute('href') || '').trim();
+                if (href && href !== '#' && href.indexOf('javascript:') !== 0) return;
               }
-            }, 250);
+              var label = ((btn.textContent || btn.value || '') + ' ' + (btn.className || '') + ' ' + (btn.id || '')).trim();
+              if (!revealRegex.test(label) || blockRegex.test(label)) return;
+
+              var qBox = btn.closest('.mcq, .question, .quiz-item, .gp-mcq, [class*="question" i], [class*="mcq" i]');
+              if (qBox && hasRevealedAnswer(qBox)) return;
+
+              if (btn.dataset) btn.dataset.gpClicked = '1';
+              try { btn.click(); } catch (e) {}
+            });
+
+            // 2. For UNATTEMPTED questions, click & highlight explicitly marked correct options
+            root.querySelectorAll('[data-correct], [data-is-correct="true" i], [data-is-correct="1"], [data-right="true" i], [data-right="1"], [data-valid="true" i]').forEach(function(opt) {
+              var dc = (opt.getAttribute('data-correct') || '').trim().toLowerCase();
+              var isBooleanTrue = (dc === '' && opt.hasAttribute('data-is-correct')) ||
+                dc === 'true' || dc === '1' || dc === 'yes' ||
+                (opt.getAttribute('data-is-correct') || '').toLowerCase() === 'true' ||
+                opt.getAttribute('data-is-correct') === '1' ||
+                (opt.getAttribute('data-right') || '').toLowerCase() === 'true' ||
+                opt.getAttribute('data-right') === '1' ||
+                (opt.getAttribute('data-valid') || '').toLowerCase() === 'true';
+              if (!isBooleanTrue) return;
+
+              var qBox = opt.closest('.mcq, .question, .quiz-item, .gp-mcq, [class*="question" i], [class*="mcq" i]');
+              if (!qBox || !hasAttemptedState(qBox)) {
+                if (opt.dataset && opt.dataset.gpClicked !== '1') {
+                  opt.dataset.gpClicked = '1';
+                  try { opt.click(); } catch (e) {}
+                }
+              }
+              opt.classList.add('gp-print-answer');
+              opt.setAttribute('data-gp-print-state', 'correct');
+            });
+
+            // Also detect inline onclick handlers passing true (e.g., checkAnswer(this, true)) on unattempted questions
+            root.querySelectorAll('[onclick]').forEach(function(opt) {
+              var oc = opt.getAttribute('onclick') || '';
+              if (!/,\s*true\s*\)|'correct'|"correct"/i.test(oc)) return;
+              var qBox = opt.closest('.mcq, .question, .quiz-item, .gp-mcq, [class*="question" i], [class*="mcq" i]');
+              if (!qBox || !hasAttemptedState(qBox)) {
+                if (opt.dataset && opt.dataset.gpClicked !== '1') {
+                  opt.dataset.gpClicked = '1';
+                  try { opt.click(); } catch (e) {}
+                }
+              }
+              opt.classList.add('gp-print-answer');
+              opt.setAttribute('data-gp-print-state', 'correct');
+            });
+
+            // 3. Render data-answer / data-ans / data-correct-answer / value-style data-correct visibly
+            root.querySelectorAll('[data-answer], [data-ans], [data-correct-answer], [data-correct]').forEach(function(node) {
+              if (node.dataset && node.dataset.gpInjected === '1') return;
+              var rawDc = (node.getAttribute('data-correct') || '').trim();
+              var dcAnswer = (rawDc && !/^(true|false|1|0|yes|no)$/i.test(rawDc)) ? rawDc : '';
+              var ans = (node.getAttribute('data-answer') || node.getAttribute('data-ans') || node.getAttribute('data-correct-answer') || dcAnswer || '').trim();
+              if (!ans) return;
+              var txt = (node.textContent || '').toLowerCase();
+              if (txt.indexOf('answer') === -1 && txt.indexOf('ans:') === -1) {
+                var ansDiv = document.createElement('div');
+                ansDiv.className = 'mcq-a gp-print-answer';
+                ansDiv.setAttribute('data-gp-print-state', 'correct');
+                ansDiv.textContent = 'Answer: ' + ans;
+                node.appendChild(ansDiv);
+              }
+              if (node.dataset) node.dataset.gpInjected = '1';
+            });
+
+            // 4. Open all details & unhide all answer/solution/key containers
+            revealAnswerElements();
+
+            // 5. Mark single-question cards so they don't split across pages when printing
+            root.querySelectorAll('.mcq, .question, .quiz-item, .q-card, .question-card, .quiz-card, .mcq-card, [class*="question" i], [class*="q-card" i]').forEach(function(card) {
+              if (card.querySelectorAll('[class*="question" i], .q-card, .mcq').length === 0 &&
+                  card.querySelectorAll('button, input[type="radio"], .option, .opt, .choice').length <= 8) {
+                card.setAttribute('data-gp-qcard', '1');
+              }
+            });
           }
 
-          if (document.readyState === 'complete') {
-            signalReady();
-          } else {
-            window.addEventListener('load', signalReady);
-          }
+          window.gpPrepareMcqsForPrint = prepareMcqsForPrint;
+          prepareMcqsForPrint();
+          window.addEventListener('load', prepareMcqsForPrint);
         })();
       </script>
     </body>
