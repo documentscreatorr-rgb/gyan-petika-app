@@ -1151,7 +1151,15 @@ private const val CAPTURE_LIVE_DOM_JS =
         else opt.removeAttribute('selected');
       });
 
-      // 2. Capture live attempted & corrected visual states from classes and computed colors
+      // Clear any active text selection or focus highlight before snapshotting
+      if (window.getSelection) {
+        try { window.getSelection().removeAllRanges(); } catch (e) {}
+      }
+      if (document.activeElement && document.activeElement.blur) {
+        try { document.activeElement.blur(); } catch (e) {}
+      }
+
+      // 2. Capture live attempted-wrong & corrected visual states from classes and computed colors
       root.querySelectorAll('[data-gp-print-state]').forEach(function(el) {
         el.removeAttribute('data-gp-print-state');
       });
@@ -1165,8 +1173,7 @@ private const val CAPTURE_LIVE_DOM_JS =
         return { r: parseInt(m[1], 10), g: parseInt(m[2], 10), b: parseInt(m[3], 10), a: a };
       }
       function isGreenColor(c) { return c && (c.g - c.r >= 18) && (c.g - c.b >= 14); }
-      function isRedColor(c) { return c && (c.r - c.g >= 26) && (c.r - c.b >= 26); }
-      function isBlueColor(c) { return c && (c.b - c.r >= 24) && (c.b - c.g >= 12); }
+      function isRedColor(c) { return c && (c.r - c.g >= 26) && (c.r - c.b >= 26) && (c.g - c.b <= 35); }
 
       var hasAttempted = false;
       function inspectAndTag(el) {
@@ -1186,8 +1193,6 @@ private const val CAPTURE_LIVE_DOM_JS =
           state = 'wrong';
         } else if (/\b(correct|right|is-correct|ans-correct|correct-answer|option-correct|mcq-a|btn-success|alert-success|true-ans)\b/.test(lowerCls)) {
           state = 'correct';
-        } else if (/\b(selected|attempted|chosen|user-selected|user-answer|active-opt|active-option)\b/.test(lowerCls)) {
-          state = 'attempted';
         }
 
         if (!state) {
@@ -1199,13 +1204,11 @@ private const val CAPTURE_LIVE_DOM_JS =
           var looksQuizEl = /\b(opt|option|choice|mcq|quiz|ans|answer|feedback|result|status|badge)\b/i.test(cls) ||
             el.tagName === 'LABEL' || el.tagName === 'LI' || el.tagName === 'BUTTON' ||
             !!el.querySelector('input[type="radio"], input[type="checkbox"]');
-          if (isGreenColor(bg) || isGreenColor(bd) || (looksQuizEl && isGreenColor(fg))) {
-            state = 'correct';
-          } else if (isRedColor(bg) || isRedColor(bd) || (looksQuizEl && isRedColor(fg))) {
-            state = 'wrong';
-          } else if (looksQuizEl && (isBlueColor(bg) || isBlueColor(bd))) {
-            if (el.tagName !== 'A' && !(el.tagName === 'BUTTON' && bg && bg.r < 30 && bg.g < 70)) {
-              state = 'attempted';
+          if (looksQuizEl) {
+            if (isGreenColor(bg) || isGreenColor(bd) || isGreenColor(fg)) {
+              state = 'correct';
+            } else if (isRedColor(bg) || isRedColor(bd) || isRedColor(fg)) {
+              state = 'wrong';
             }
           }
         }
@@ -1222,10 +1225,6 @@ private const val CAPTURE_LIVE_DOM_JS =
 
       root.querySelectorAll('input[type="radio"]:checked, input[type="checkbox"]:checked').forEach(function(inp) {
         hasAttempted = true;
-        var wrap = inp.closest('label, li, .option, .opt, .choice, [class*="option" i], [class*="choice" i], p, div');
-        if (wrap && wrap.querySelectorAll('input[type="radio"], input[type="checkbox"]').length <= 1 && !wrap.getAttribute('data-gp-print-state')) {
-          wrap.setAttribute('data-gp-print-state', 'attempted');
-        }
       });
 
       var headStyles = '';
@@ -1392,6 +1391,12 @@ internal fun buildPrintablePostHtml(
           -webkit-print-color-adjust: exact !important;
           color-adjust: exact !important;
           print-color-adjust: exact !important;
+          -webkit-tap-highlight-color: transparent !important;
+          outline: none !important;
+        }
+        ::selection {
+          background: transparent !important;
+          color: inherit !important;
         }
         html, body {
           margin: 0;
@@ -1450,13 +1455,6 @@ internal fun buildPrintablePostHtml(
           page-break-inside: avoid;
         }
         /* Zero-specificity :where() fallbacks preserve native post badges, grids, and option styles */
-        :where(.selected, .attempted, .chosen, .user-selected, .user-answer, [data-gp-print-state="attempted"]) {
-          color: #1E3A8A;
-          font-weight: 700;
-          background-color: #DBEAFE;
-          border: 1.5px solid #3B82F6;
-          border-radius: 10px;
-        }
         :where(.wrong, .incorrect, .is-wrong, .ans-wrong, .wrong-answer, .option-wrong, .btn-danger, .alert-danger, [data-gp-print-state="wrong"]) {
           color: #991B1B;
           font-weight: 700;
@@ -1530,7 +1528,7 @@ internal fun buildPrintablePostHtml(
             overflow: visible !important;
           }
           [data-gp-qcard="1"], tr, blockquote, .mcq-q, .mcq-a, .gp-print-answer,
-          [data-gp-print-state="correct"], [data-gp-print-state="wrong"], [data-gp-print-state="attempted"] {
+          [data-gp-print-state="correct"], [data-gp-print-state="wrong"] {
             break-inside: avoid;
             page-break-inside: avoid;
           }

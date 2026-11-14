@@ -119,7 +119,7 @@ class BloggerFeedParserTest {
     assertTrue(printable.contains("gp-print-answer"))
     assertTrue(printable.contains("data-gp-print-state=\"wrong\""))
     assertTrue(printable.contains("data-gp-print-state=\"correct\""))
-    assertTrue(printable.contains("data-gp-print-state=\"attempted\""))
+    assertFalse(printable.contains("#DBEAFE"))
     assertTrue(printable.contains(".mcq-q"))
     assertTrue(printable.contains(".mcq-a"))
   }
