@@ -24,7 +24,10 @@
     <string name="cd_back">Go back</string>
     <string name="cd_bookmark">Toggle bookmark</string>
     <string name="cd_share">Share study note</string>
-    <string name="cd_print">Print study note</string>
+    <string name="cd_print">Smart AI print study note</string>
+    <string name="ai_print_optimizing">Adjusting print layout by topics…</string>
+    <string name="ai_print_badge_label">AI Print Layout</string>
+    <string name="cd_dismiss_notice">Dismiss notice</string>
     <string name="cd_font_decrease">Decrease text size</string>
     <string name="cd_font_increase">Increase text size</string>
     <string name="cd_paper_mode">Toggle Eye-Comfort Paper Mode</string>

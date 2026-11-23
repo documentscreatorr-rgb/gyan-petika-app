@@ -3,10 +3,13 @@ package com.example.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.AiRepository
 import com.example.data.BundledContent
 import com.example.data.FeedSyncStatus
 import com.example.data.ListDensity
+import com.example.data.PlaceholderAiRepository
 import com.example.data.PreferencesRepository
+import com.example.data.PrintTopicLayoutPlan
 import com.example.data.StudyPost
 import com.example.data.StudyRepository
 import com.example.data.TextSizePreset
@@ -123,6 +126,7 @@ data class MainUiState(
 class MainViewModel(application: Application) : AndroidViewModel(application) {
   private val studyRepository = StudyRepository(application)
   private val prefsRepository = PreferencesRepository(application)
+  private val aiRepository: AiRepository = PlaceholderAiRepository()
 
   private val _posts = MutableStateFlow(BundledContent.fallbackPosts)
   private val _selectedClassFilter = MutableStateFlow("All")
@@ -334,6 +338,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   fun setAutoCacheOffline(enabled: Boolean) {
     viewModelScope.launch { prefsRepository.setAutoCacheOffline(enabled) }
   }
+
+  suspend fun planSmartPrintLayout(postTitle: String, rawHtml: String): PrintTopicLayoutPlan =
+    aiRepository.planSmartPrintLayout(postTitle = postTitle, rawHtml = rawHtml)
 
   fun resetDefaults() {
     viewModelScope.launch {

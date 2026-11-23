@@ -427,6 +427,7 @@ private fun GyanPetikaApp(viewModel: MainViewModel) {
                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                   }
                 },
+                onPlanSmartPrintLayout = viewModel::planSmartPrintLayout,
               )
             }
           }

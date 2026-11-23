@@ -2,11 +2,13 @@ package com.example
 
 import com.example.data.BloggerFeedParser
 import com.example.data.BundledContent
+import com.example.data.PlaceholderAiRepository
 import com.example.data.StudyPost
 import com.example.ui.MainUiState
 import com.example.ui.components.ArticleBlock
 import com.example.ui.components.ArticleHtmlParser
 import com.example.ui.screens.buildPrintablePostHtml
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -255,5 +257,30 @@ class BloggerFeedParserTest {
     assertEquals(7, state.noticePosts.size)
     assertFalse(state.noticePosts.any { it.id == "board-notice-only" })
     assertEquals(listOf("notice-1", "notice-2", "notice-3", "notice-4", "notice-5"), state.noticePosts.take(5).map { it.id })
+  }
+
+  @Test
+  fun `placeholder ai print layout detects topic headings and includes firebase notice`() = runTest {
+    val html =
+      """
+      <h2>1. Computer Maintenance</h2>
+      <p>Keep hardware clean and updated.</p>
+      <h2>2. Security &amp; Backups</h2>
+      <p>Use strong passwords and regular backups.</p>
+      """.trimIndent()
+    val repo = PlaceholderAiRepository()
+    val plan = repo.planSmartPrintLayout("ICT Unit 3", html)
+
+    assertTrue(plan.isPlaceholder)
+    assertTrue(plan.keepSectionsTogether)
+    assertTrue(plan.preventOrphanHeadings)
+    assertEquals(2, plan.groupedTopicCount)
+    assertEquals(listOf("1. Computer Maintenance", "2. Security & Backups"), plan.topicTitles)
+    assertTrue(plan.firebaseNotice?.contains("Firebase", ignoreCase = true) == true)
+
+    val printable = buildPrintablePostHtml(rawHtml = html, applyTopicGrouping = plan.keepSectionsTogether)
+    assertTrue(printable.contains("gpGroupTopicsForPrint"))
+    assertTrue(printable.contains("data-gp-keep-together"))
+    assertTrue(printable.contains("orphans: 3"))
   }
 }

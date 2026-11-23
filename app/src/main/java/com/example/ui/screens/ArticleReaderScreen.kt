@@ -25,8 +25,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -39,23 +37,25 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Comment
-import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Contrast
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Print
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -65,6 +65,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -85,6 +86,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import com.example.R
 import com.example.data.BundledContent
+import com.example.data.PlaceholderAiRepository
+import com.example.data.PrintTopicLayoutPlan
 import com.example.data.StudyPost
 import com.example.data.UserPreferences
 import com.example.ui.components.ArticleBlock
@@ -96,8 +99,8 @@ import com.example.ui.theme.HeroGradientMid
 import com.example.ui.theme.HeroGradientStart
 import com.example.ui.theme.LocalGyanExtendedColors
 import com.example.ui.theme.PrimaryNavy
+import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ArticleReaderScreen(
   post: StudyPost,
@@ -109,14 +112,20 @@ fun ArticleReaderScreen(
   onToggleBookmark: () -> Unit,
   onLabelClick: (String) -> Unit,
   onInternalPostLinkClick: (String) -> Unit,
+  onPlanSmartPrintLayout: suspend (String, String) -> PrintTopicLayoutPlan = { title, html ->
+    PlaceholderAiRepository().planSmartPrintLayout(title, html)
+  },
   modifier: Modifier = Modifier,
 ) {
   val context = LocalContext.current
   val extended = LocalGyanExtendedColors.current
+  val coroutineScope = rememberCoroutineScope()
   val isSaved = post.id in preferences.savedPostIds
   val baseFontSp = preferences.customFontSizeSp
   var useFullPostView by rememberSaveable(post.id) { mutableStateOf(true) }
   var activePostWebView by remember(post.id) { mutableStateOf<WebView?>(null) }
+  var isPreparingAiPrint by remember(post.id) { mutableStateOf(false) }
+  var lastPrintLayoutPlan by remember(post.id) { mutableStateOf<PrintTopicLayoutPlan?>(null) }
   val cleanBlocks = remember(post.id, post.htmlContent) { ArticleHtmlParser.parse(post) }
 
   DisposableEffect(post.id, useFullPostView) {
@@ -134,20 +143,47 @@ fun ArticleReaderScreen(
     ReaderFloatingToolbar(
       isSaved = isSaved,
       isPaperMode = preferences.eyeComfortPaperMode,
+      isPreparingPrint = isPreparingAiPrint,
       onBackClick = onBackClick,
       onFontDecrease = onFontDecrease,
       onFontIncrease = onFontIncrease,
       onTogglePaperMode = onTogglePaperMode,
       onToggleBookmark = onToggleBookmark,
       onPrintClick = {
-        printStudyPost(
-          context = context,
+        if (isPreparingAiPrint) return@ReaderFloatingToolbar
+        isPreparingAiPrint = true
+        capturePrintableSnapshot(
           post = post,
           liveWebView = if (useFullPostView) activePostWebView else null,
-        )
+        ) { snapshot ->
+          coroutineScope.launch {
+            val plan =
+              runCatching { onPlanSmartPrintLayout(post.title, snapshot.rawHtml) }
+                .getOrNull()
+            lastPrintLayoutPlan = plan
+            launchPrintWebView(
+              context = context,
+              post = post,
+              rawHtml = snapshot.rawHtml,
+              extraHeadStyles = snapshot.extraHeadStyles,
+              preserveAttemptedSnapshot = snapshot.preserveAttemptedSnapshot,
+              layoutPlan = plan,
+              onPrintDispatched = { isPreparingAiPrint = false },
+            )
+          }
+        }
       },
       onShareClick = { shareStudyPost(context, post) },
     )
+
+    AnimatedVisibility(visible = isPreparingAiPrint || lastPrintLayoutPlan != null) {
+      AiPrintStatusBanner(
+        isPreparing = isPreparingAiPrint,
+        layoutPlan = lastPrintLayoutPlan,
+        onDismiss = { lastPrintLayoutPlan = null },
+        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+      )
+    }
 
     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
       Column(
@@ -288,65 +324,6 @@ fun ArticleReaderScreen(
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
           cleanBlocks.filterNot { it is ArticleBlock.HeroBannerBlock }.forEach { block ->
             RenderCleanBlock(block = block, baseFontSp = baseFontSp, postTitle = post.title)
-          }
-        }
-      }
-
-      // Labels & Original Post Footer
-      Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = extended.readerSurface,
-        border = BorderStroke(1.dp, extended.readerBorder),
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        Column(
-          modifier = Modifier.padding(16.dp),
-          verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-          if (post.labels.isNotEmpty()) {
-            Text(
-              text = "Post Topics & Labels",
-              style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-              color = extended.readerTextPrimary,
-            )
-            FlowRow(
-              horizontalArrangement = Arrangement.spacedBy(8.dp),
-              verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-              post.labels.forEach { label ->
-                Surface(
-                  onClick = { onLabelClick(label) },
-                  shape = RoundedCornerShape(999.dp),
-                  color = extended.cardSubtle,
-                  border = BorderStroke(1.dp, extended.readerBorder),
-                  modifier = Modifier.minimumInteractiveComponentSize(),
-                ) {
-                  Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                  )
-                }
-              }
-            }
-          }
-
-          OutlinedButton(
-            onClick = {
-              val intent = Intent(Intent.ACTION_VIEW, Uri.parse(post.postUrl))
-              context.startActivity(intent)
-            },
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth().minimumInteractiveComponentSize().testTag("open_original_post"),
-          ) {
-            Text("View Original Post & Comments on Gyan Petika")
-            Spacer(modifier = Modifier.width(6.dp))
-            Icon(
-              imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
-              contentDescription = null,
-              modifier = Modifier.size(16.dp),
-            )
           }
         }
       }
@@ -939,6 +916,7 @@ private fun RenderCleanBlock(
 private fun ReaderFloatingToolbar(
   isSaved: Boolean,
   isPaperMode: Boolean,
+  isPreparingPrint: Boolean,
   onBackClick: () -> Unit,
   onFontDecrease: () -> Unit,
   onFontIncrease: () -> Unit,
@@ -1031,13 +1009,30 @@ private fun ReaderFloatingToolbar(
         }
         IconButton(
           onClick = onPrintClick,
+          enabled = !isPreparingPrint,
           modifier = Modifier.minimumInteractiveComponentSize().testTag("reader_print_button"),
         ) {
-          Icon(
-            imageVector = Icons.Rounded.Print,
-            contentDescription = stringResource(R.string.cd_print),
-            tint = extended.readerTextPrimary,
-          )
+          if (isPreparingPrint) {
+            CircularProgressIndicator(
+              modifier = Modifier.size(20.dp),
+              strokeWidth = 2.dp,
+              color = MaterialTheme.colorScheme.primary,
+            )
+          } else {
+            Box(contentAlignment = Alignment.Center) {
+              Icon(
+                imageVector = Icons.Rounded.Print,
+                contentDescription = stringResource(R.string.cd_print),
+                tint = extended.readerTextPrimary,
+              )
+              Icon(
+                imageVector = Icons.Rounded.AutoAwesome,
+                contentDescription = null,
+                tint = AccentGold,
+                modifier = Modifier.size(11.dp).align(Alignment.TopEnd),
+              )
+            }
+          }
         }
         IconButton(
           onClick = onShareClick,
@@ -1047,6 +1042,83 @@ private fun ReaderFloatingToolbar(
             imageVector = Icons.Rounded.Share,
             contentDescription = stringResource(R.string.cd_share),
             tint = extended.readerTextPrimary,
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun AiPrintStatusBanner(
+  isPreparing: Boolean,
+  layoutPlan: PrintTopicLayoutPlan?,
+  onDismiss: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  val extended = LocalGyanExtendedColors.current
+  Surface(
+    shape = RoundedCornerShape(14.dp),
+    color = extended.readerSurface,
+    border = BorderStroke(1.dp, extended.readerBorder),
+    modifier = modifier.fillMaxWidth().testTag("ai_print_layout_banner"),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+      verticalAlignment = Alignment.Top,
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      if (isPreparing) {
+        CircularProgressIndicator(
+          modifier = Modifier.size(18.dp).padding(top = 2.dp),
+          strokeWidth = 2.dp,
+          color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+          text = stringResource(R.string.ai_print_optimizing),
+          style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+          color = extended.readerTextPrimary,
+          modifier = Modifier.weight(1f),
+        )
+      } else if (layoutPlan != null) {
+        Icon(
+          imageVector = Icons.Rounded.AutoAwesome,
+          contentDescription = null,
+          tint = AccentGold,
+          modifier = Modifier.size(18.dp),
+        )
+        Column(
+          modifier = Modifier.weight(1f),
+          verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+          Text(
+            text = stringResource(R.string.ai_print_badge_label),
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.primary,
+          )
+          Text(
+            text = layoutPlan.summaryMessage,
+            style = MaterialTheme.typography.bodySmall,
+            color = extended.readerTextPrimary,
+          )
+          if (!layoutPlan.firebaseNotice.isNullOrBlank()) {
+            Text(
+              text = layoutPlan.firebaseNotice,
+              style = MaterialTheme.typography.labelSmall,
+              color = extended.readerTextSecondary,
+              modifier = Modifier.testTag("ai_print_firebase_notice"),
+            )
+          }
+        }
+        IconButton(
+          onClick = onDismiss,
+          modifier = Modifier.minimumInteractiveComponentSize().testTag("dismiss_ai_print_banner"),
+        ) {
+          Icon(
+            imageVector = Icons.Rounded.Close,
+            contentDescription = stringResource(R.string.cd_dismiss_notice),
+            tint = extended.readerTextSecondary,
+            modifier = Modifier.size(18.dp),
           )
         }
       }
@@ -1275,11 +1347,17 @@ private const val CAPTURE_LIVE_DOM_JS =
   })();
   """
 
+private data class PrintableSnapshot(
+  val rawHtml: String,
+  val extraHeadStyles: String,
+  val preserveAttemptedSnapshot: Boolean,
+)
+
 @SuppressLint("SetJavaScriptEnabled")
-private fun printStudyPost(
-  context: Context,
+private fun capturePrintableSnapshot(
   post: StudyPost,
   liveWebView: WebView? = null,
+  onCaptured: (PrintableSnapshot) -> Unit,
 ) {
   if (liveWebView != null) {
     try {
@@ -1290,20 +1368,20 @@ private fun printStudyPost(
           }.getOrNull()
         val useFallback = parsed == null || parsed.optBoolean("fallback", true)
         if (useFallback) {
-          launchPrintWebView(
-            context = context,
-            post = post,
-            rawHtml = post.htmlContent,
-            extraHeadStyles = "",
-            preserveAttemptedSnapshot = false,
+          onCaptured(
+            PrintableSnapshot(
+              rawHtml = post.htmlContent,
+              extraHeadStyles = "",
+              preserveAttemptedSnapshot = false,
+            )
           )
         } else {
-          launchPrintWebView(
-            context = context,
-            post = post,
-            rawHtml = parsed.optString("bodyHtml", post.htmlContent).ifBlank { post.htmlContent },
-            extraHeadStyles = parsed.optString("headStyles", ""),
-            preserveAttemptedSnapshot = parsed.optBoolean("hasAttempted", false),
+          onCaptured(
+            PrintableSnapshot(
+              rawHtml = parsed.optString("bodyHtml", post.htmlContent).ifBlank { post.htmlContent },
+              extraHeadStyles = parsed.optString("headStyles", ""),
+              preserveAttemptedSnapshot = parsed.optBoolean("hasAttempted", false),
+            )
           )
         }
       }
@@ -1313,12 +1391,12 @@ private fun printStudyPost(
     }
   }
 
-  launchPrintWebView(
-    context = context,
-    post = post,
-    rawHtml = post.htmlContent,
-    extraHeadStyles = "",
-    preserveAttemptedSnapshot = false,
+  onCaptured(
+    PrintableSnapshot(
+      rawHtml = post.htmlContent,
+      extraHeadStyles = "",
+      preserveAttemptedSnapshot = false,
+    )
   )
 }
 
@@ -1329,6 +1407,8 @@ private fun launchPrintWebView(
   rawHtml: String,
   extraHeadStyles: String,
   preserveAttemptedSnapshot: Boolean,
+  layoutPlan: PrintTopicLayoutPlan? = null,
+  onPrintDispatched: () -> Unit = {},
 ) {
   val activity = context.findActivity() ?: context
   val mainHandler = Handler(Looper.getMainLooper())
@@ -1339,6 +1419,7 @@ private fun launchPrintWebView(
   fun triggerSystemPrint() {
     if (printTriggered) return
     printTriggered = true
+    onPrintDispatched()
     val printManager =
       (activity.getSystemService(Context.PRINT_SERVICE)
         ?: context.getSystemService(Context.PRINT_SERVICE)) as? PrintManager
@@ -1362,10 +1443,12 @@ private fun launchPrintWebView(
     object : WebViewClient() {
       override fun onPageFinished(view: WebView?, url: String?) {
         super.onPageFinished(view, url)
-        view?.evaluateJavascript("window.gpPrepareMcqsForPrint && window.gpPrepareMcqsForPrint();") {
-          mainHandler.postDelayed({ triggerSystemPrint() }, 400L)
+        view?.evaluateJavascript(
+          "window.gpPrepareMcqsForPrint && window.gpPrepareMcqsForPrint(); window.gpGroupTopicsForPrint && window.gpGroupTopicsForPrint();"
+        ) {
+          mainHandler.postDelayed({ triggerSystemPrint() }, 420L)
         }
-        mainHandler.postDelayed({ triggerSystemPrint() }, 1200L)
+        mainHandler.postDelayed({ triggerSystemPrint() }, 1300L)
       }
     }
 
@@ -1374,6 +1457,8 @@ private fun launchPrintWebView(
       rawHtml = rawHtml,
       extraHeadStyles = extraHeadStyles,
       preserveAttemptedSnapshot = preserveAttemptedSnapshot,
+      applyTopicGrouping = layoutPlan?.keepSectionsTogether ?: true,
+      maxUnbrokenTopicHeightPx = layoutPlan?.maxUnbrokenBlockHeightPx ?: 860,
     )
   printWebView.loadDataWithBaseURL(
     BundledContent.BLOG_BASE_URL,
@@ -1390,6 +1475,8 @@ internal fun buildPrintablePostHtml(
   rawHtml: String,
   extraHeadStyles: String = "",
   preserveAttemptedSnapshot: Boolean = false,
+  applyTopicGrouping: Boolean = true,
+  maxUnbrokenTopicHeightPx: Int = 860,
 ): String {
   val frozenTemplateHtml =
     if (preserveAttemptedSnapshot) {
@@ -1398,6 +1485,7 @@ internal fun buildPrintablePostHtml(
     } else {
       ""
     }
+  val maxTopicPx = maxUnbrokenTopicHeightPx.coerceIn(480, 1100)
   return """
     <!DOCTYPE html>
     <html>
@@ -1441,7 +1529,19 @@ internal fun buildPrintablePostHtml(
         img, video { max-width: 100% !important; height: auto !important; border-radius: 8px; }
         iframe { max-width: 100% !important; }
         :where(a) { color: #0F345B; font-weight: 600; text-decoration: none; }
-        h1, h2, h3, h4 { line-height: 1.35; margin-top: 1em; margin-bottom: 0.45em; break-after: avoid; page-break-after: avoid; }
+        h1, h2, h3, h4, h5, h6, [data-gp-topic-heading="1"] {
+          line-height: 1.35;
+          margin-top: 1em;
+          margin-bottom: 0.45em;
+          break-after: avoid !important;
+          page-break-after: avoid !important;
+        }
+        p, li { orphans: 3; widows: 3; }
+        .gp-topic-group, .gp-topic-pair { display: block; }
+        [data-gp-keep-together="1"], .gp-topic-pair {
+          break-inside: avoid !important;
+          page-break-inside: avoid !important;
+        }
         p { margin: 0.55em 0; }
         ul, ol { padding-left: 1.35em; margin: 0.5em 0; }
         li { margin: 0.3em 0; }
@@ -1556,10 +1656,19 @@ internal fun buildPrintablePostHtml(
             height: auto !important;
             overflow: visible !important;
           }
-          [data-gp-qcard="1"], tr, blockquote, .mcq-q, .mcq-a, .gp-print-answer,
+          [data-gp-qcard="1"], [data-gp-keep-together="1"], .gp-topic-pair,
+          tr, blockquote, figure, pre, .mcq-q, .mcq-a, .gp-print-answer,
           [data-gp-print-state="correct"], [data-gp-print-state="wrong"] {
-            break-inside: avoid;
-            page-break-inside: avoid;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          h1, h2, h3, h4, h5, h6, [data-gp-topic-heading="1"] {
+            break-after: avoid !important;
+            page-break-after: avoid !important;
+          }
+          p, li {
+            orphans: 3;
+            widows: 3;
           }
         }
       </style>
@@ -1762,13 +1871,166 @@ internal fun buildPrintablePostHtml(
               if (card.querySelectorAll('[class*="question" i], .q-card, .mcq').length === 0 &&
                   card.querySelectorAll('button, input[type="radio"], .option, .opt, .choice').length <= 8) {
                 card.setAttribute('data-gp-qcard', '1');
+                card.setAttribute('data-gp-keep-together', '1');
               }
             });
           }
 
+          function isTopicHeadingNode(node) {
+            if (!node || node.nodeType !== 1) return false;
+            var tag = node.tagName;
+            if (tag === 'H1' || tag === 'H2' || tag === 'H3' || tag === 'H4') return true;
+            var cls = (node.className || '').toString().toLowerCase();
+            if (/\b(topic-title|section-title|sub-heading|subheading|heading)\b/.test(cls)) return true;
+            if (tag === 'P' || tag === 'DIV') {
+              var txt = (node.textContent || '').trim();
+              if (txt.length >= 3 && txt.length <= 110 && node.children.length === 1) {
+                var childTag = node.children[0].tagName;
+                if ((childTag === 'STRONG' || childTag === 'B') &&
+                    ((node.children[0].textContent || '').trim().length >= txt.length - 3)) {
+                  return true;
+                }
+              }
+            }
+            return false;
+          }
+
+          function findPrimaryContentContainer(root) {
+            var current = root;
+            for (var depth = 0; depth < 3; depth++) {
+              var elementChildren = [];
+              for (var i = 0; i < current.children.length; i++) {
+                var ch = current.children[i];
+                if (ch.tagName !== 'SCRIPT' && ch.tagName !== 'STYLE' && ch.tagName !== 'TEMPLATE') {
+                  elementChildren.push(ch);
+                }
+              }
+              if (elementChildren.length === 1 &&
+                  (elementChildren[0].tagName === 'DIV' || elementChildren[0].tagName === 'ARTICLE' || elementChildren[0].tagName === 'MAIN')) {
+                current = elementChildren[0];
+              } else {
+                break;
+              }
+            }
+            return current;
+          }
+
+          function groupFlatMcqTriplets(container) {
+            var children = Array.prototype.slice.call(container.children);
+            for (var i = 0; i < children.length; i++) {
+              var el = children[i];
+              if (!el || !el.classList || !el.classList.contains('mcq-q')) continue;
+              if (el.closest('[data-gp-qcard="1"]')) continue;
+              var wrapper = document.createElement('div');
+              wrapper.className = 'gp-topic-group';
+              wrapper.setAttribute('data-gp-qcard', '1');
+              wrapper.setAttribute('data-gp-keep-together', '1');
+              container.insertBefore(wrapper, el);
+              wrapper.appendChild(el);
+              var next = wrapper.nextElementSibling;
+              var steps = 0;
+              while (next && steps < 3) {
+                if (next.classList && next.classList.contains('mcq-q')) break;
+                if (isTopicHeadingNode(next)) break;
+                var after = next.nextElementSibling;
+                var isAnswer = next.classList && (next.classList.contains('mcq-a') || next.classList.contains('gp-print-answer'));
+                wrapper.appendChild(next);
+                steps++;
+                if (isAnswer) break;
+                next = after;
+              }
+            }
+          }
+
+          function groupSiblingsByTopicHeading(container) {
+            if (!container || container.dataset && container.dataset.gpGrouped === '1') return;
+            var children = Array.prototype.slice.call(container.children);
+            var headingCount = 0;
+            for (var i = 0; i < children.length; i++) {
+              if (isTopicHeadingNode(children[i])) headingCount++;
+            }
+            if (headingCount === 0) return;
+
+            var activeGroup = null;
+            for (var j = 0; j < children.length; j++) {
+              var node = children[j];
+              if (!node || node.tagName === 'SCRIPT' || node.tagName === 'STYLE' || node.tagName === 'TEMPLATE') {
+                continue;
+              }
+              if (node.classList && (node.classList.contains('gp-section') || node.classList.contains('gp-topic-group'))) {
+                activeGroup = null;
+                continue;
+              }
+              if (isTopicHeadingNode(node)) {
+                node.setAttribute('data-gp-topic-heading', '1');
+                activeGroup = document.createElement('div');
+                activeGroup.className = 'gp-topic-group';
+                activeGroup.setAttribute('data-gp-topic-group', '1');
+                container.insertBefore(activeGroup, node);
+                activeGroup.appendChild(node);
+              } else if (activeGroup) {
+                activeGroup.appendChild(node);
+              }
+            }
+            if (container.dataset) container.dataset.gpGrouped = '1';
+          }
+
+          function groupTopicsForPrint() {
+            var enabled = ${if (applyTopicGrouping) "true" else "false"};
+            if (!enabled) return;
+            var root = document.getElementById('gp-print-root') || document.body;
+            if (!root || (root.dataset && root.dataset.gpTopicsGrouped === '1')) return;
+
+            var maxUnbrokenPx = $maxTopicPx;
+            var mainContainer = findPrimaryContentContainer(root);
+
+            // 1. Keep flat MCQ question + options + answer triplets together
+            groupFlatMcqTriplets(mainContainer);
+            root.querySelectorAll('.gp-section, section, article').forEach(function(sec) {
+              groupFlatMcqTriplets(sec);
+            });
+
+            // 2. Group each topic heading with its following content siblings
+            groupSiblingsByTopicHeading(mainContainer);
+
+            // 3. Mark semantic topic containers so moderate-height topics never split mid-topic
+            var topicCandidates = root.querySelectorAll(
+              '[data-gp-topic-group="1"], .gp-section, section, article, .topic, .topic-card, .note-card, .card, .callout, .box, table, figure, details'
+            );
+            topicCandidates.forEach(function(block) {
+              if (block === mainContainer) return;
+              var rect = block.getBoundingClientRect();
+              var h = rect ? rect.height : 0;
+              if (h > 0 && h <= maxUnbrokenPx) {
+                block.setAttribute('data-gp-keep-together', '1');
+              } else if (h > maxUnbrokenPx) {
+                block.removeAttribute('data-gp-keep-together');
+                // For very long multi-page topics, keep heading + first content block paired so heading never orphans
+                var firstEl = block.firstElementChild;
+                if (firstEl && isTopicHeadingNode(firstEl) && firstEl.nextElementSibling &&
+                    !firstEl.parentElement.classList.contains('gp-topic-pair')) {
+                  var leadPair = document.createElement('div');
+                  leadPair.className = 'gp-topic-pair';
+                  leadPair.setAttribute('data-gp-keep-together', '1');
+                  var secondEl = firstEl.nextElementSibling;
+                  block.insertBefore(leadPair, firstEl);
+                  leadPair.appendChild(firstEl);
+                  leadPair.appendChild(secondEl);
+                }
+              }
+            });
+
+            if (root.dataset) root.dataset.gpTopicsGrouped = '1';
+          }
+
           window.gpPrepareMcqsForPrint = prepareMcqsForPrint;
+          window.gpGroupTopicsForPrint = groupTopicsForPrint;
           prepareMcqsForPrint();
-          window.addEventListener('load', prepareMcqsForPrint);
+          groupTopicsForPrint();
+          window.addEventListener('load', function() {
+            prepareMcqsForPrint();
+            groupTopicsForPrint();
+          });
         })();
       </script>
     </body>
