@@ -48,6 +48,7 @@ import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Contrast
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Print
 import androidx.compose.material.icons.rounded.Share
@@ -56,8 +57,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -65,7 +68,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -86,10 +88,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import com.example.R
 import com.example.data.BundledContent
-import com.example.data.PlaceholderAiRepository
 import com.example.data.PrintTopicLayoutPlan
 import com.example.data.StudyPost
 import com.example.data.UserPreferences
+import com.example.ui.AiPrintUiState
 import com.example.ui.components.ArticleBlock
 import com.example.ui.components.ArticleHtmlParser
 import com.example.ui.theme.AccentGold
@@ -99,12 +101,12 @@ import com.example.ui.theme.HeroGradientMid
 import com.example.ui.theme.HeroGradientStart
 import com.example.ui.theme.LocalGyanExtendedColors
 import com.example.ui.theme.PrimaryNavy
-import kotlinx.coroutines.launch
 
 @Composable
 fun ArticleReaderScreen(
   post: StudyPost,
   preferences: UserPreferences,
+  aiPrintUiState: AiPrintUiState = AiPrintUiState.Idle,
   onBackClick: () -> Unit,
   onFontDecrease: () -> Unit,
   onFontIncrease: () -> Unit,
@@ -112,21 +114,27 @@ fun ArticleReaderScreen(
   onToggleBookmark: () -> Unit,
   onLabelClick: (String) -> Unit,
   onInternalPostLinkClick: (String) -> Unit,
-  onPlanSmartPrintLayout: suspend (String, String) -> PrintTopicLayoutPlan = { title, html ->
-    PlaceholderAiRepository().planSmartPrintLayout(title, html)
-  },
+  onRequestSmartPrintLayout: (String, String, (PrintTopicLayoutPlan) -> Unit) -> Unit = { _, _, _ -> },
+  onClearAiPrintState: () -> Unit = {},
   modifier: Modifier = Modifier,
 ) {
   val context = LocalContext.current
   val extended = LocalGyanExtendedColors.current
-  val coroutineScope = rememberCoroutineScope()
   val isSaved = post.id in preferences.savedPostIds
   val baseFontSp = preferences.customFontSizeSp
   var useFullPostView by rememberSaveable(post.id) { mutableStateOf(true) }
   var activePostWebView by remember(post.id) { mutableStateOf<WebView?>(null) }
-  var isPreparingAiPrint by remember(post.id) { mutableStateOf(false) }
-  var lastPrintLayoutPlan by remember(post.id) { mutableStateOf<PrintTopicLayoutPlan?>(null) }
+  var isDispatchingPrint by remember(post.id) { mutableStateOf(false) }
+  var lastCapturedSnapshot by remember(post.id) { mutableStateOf<PrintableSnapshot?>(null) }
   val cleanBlocks = remember(post.id, post.htmlContent) { ArticleHtmlParser.parse(post) }
+  val isPreparingAiPrint = aiPrintUiState is AiPrintUiState.Loading || isDispatchingPrint
+
+  DisposableEffect(post.id) {
+    onClearAiPrintState()
+    onDispose {
+      onClearAiPrintState()
+    }
+  }
 
   DisposableEffect(post.id, useFullPostView) {
     if (!useFullPostView) {
@@ -134,6 +142,54 @@ fun ArticleReaderScreen(
     }
     onDispose {
       activePostWebView = null
+    }
+  }
+
+  fun startAiSmartPrint() {
+    if (isPreparingAiPrint) return
+    capturePrintableSnapshot(
+      post = post,
+      liveWebView = if (useFullPostView) activePostWebView else null,
+    ) { snapshot ->
+      lastCapturedSnapshot = snapshot
+      onRequestSmartPrintLayout(post.title, snapshot.rawHtml) { plan ->
+        isDispatchingPrint = true
+        launchPrintWebView(
+          context = context,
+          post = post,
+          rawHtml = snapshot.rawHtml,
+          extraHeadStyles = snapshot.extraHeadStyles,
+          preserveAttemptedSnapshot = snapshot.preserveAttemptedSnapshot,
+          layoutPlan = plan,
+          onPrintDispatched = { isDispatchingPrint = false },
+        )
+      }
+    }
+  }
+
+  fun startStandardPrint() {
+    if (isDispatchingPrint) return
+    val cached = lastCapturedSnapshot
+    val dispatch: (PrintableSnapshot) -> Unit = { snapshot ->
+      isDispatchingPrint = true
+      launchPrintWebView(
+        context = context,
+        post = post,
+        rawHtml = snapshot.rawHtml,
+        extraHeadStyles = snapshot.extraHeadStyles,
+        preserveAttemptedSnapshot = snapshot.preserveAttemptedSnapshot,
+        layoutPlan = null,
+        onPrintDispatched = { isDispatchingPrint = false },
+      )
+    }
+    if (cached != null) {
+      dispatch(cached)
+    } else {
+      capturePrintableSnapshot(
+        post = post,
+        liveWebView = if (useFullPostView) activePostWebView else null,
+        onCaptured = dispatch,
+      )
     }
   }
 
@@ -149,38 +205,19 @@ fun ArticleReaderScreen(
       onFontIncrease = onFontIncrease,
       onTogglePaperMode = onTogglePaperMode,
       onToggleBookmark = onToggleBookmark,
-      onPrintClick = {
-        if (isPreparingAiPrint) return@ReaderFloatingToolbar
-        isPreparingAiPrint = true
-        capturePrintableSnapshot(
-          post = post,
-          liveWebView = if (useFullPostView) activePostWebView else null,
-        ) { snapshot ->
-          coroutineScope.launch {
-            val plan =
-              runCatching { onPlanSmartPrintLayout(post.title, snapshot.rawHtml) }
-                .getOrNull()
-            lastPrintLayoutPlan = plan
-            launchPrintWebView(
-              context = context,
-              post = post,
-              rawHtml = snapshot.rawHtml,
-              extraHeadStyles = snapshot.extraHeadStyles,
-              preserveAttemptedSnapshot = snapshot.preserveAttemptedSnapshot,
-              layoutPlan = plan,
-              onPrintDispatched = { isPreparingAiPrint = false },
-            )
-          }
-        }
-      },
+      onPrintClick = { startAiSmartPrint() },
       onShareClick = { shareStudyPost(context, post) },
     )
 
-    AnimatedVisibility(visible = isPreparingAiPrint || lastPrintLayoutPlan != null) {
+    AnimatedVisibility(visible = aiPrintUiState !is AiPrintUiState.Idle) {
       AiPrintStatusBanner(
-        isPreparing = isPreparingAiPrint,
-        layoutPlan = lastPrintLayoutPlan,
-        onDismiss = { lastPrintLayoutPlan = null },
+        uiState = aiPrintUiState,
+        onRetryAi = { startAiSmartPrint() },
+        onStandardPrint = {
+          onClearAiPrintState()
+          startStandardPrint()
+        },
+        onDismiss = onClearAiPrintState,
         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
       )
     }
@@ -1051,16 +1088,22 @@ private fun ReaderFloatingToolbar(
 
 @Composable
 private fun AiPrintStatusBanner(
-  isPreparing: Boolean,
-  layoutPlan: PrintTopicLayoutPlan?,
+  uiState: AiPrintUiState,
+  onRetryAi: () -> Unit,
+  onStandardPrint: () -> Unit,
   onDismiss: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
   val extended = LocalGyanExtendedColors.current
+  val isError = uiState is AiPrintUiState.Error
   Surface(
     shape = RoundedCornerShape(14.dp),
-    color = extended.readerSurface,
-    border = BorderStroke(1.dp, extended.readerBorder),
+    color = if (isError) MaterialTheme.colorScheme.errorContainer else extended.readerSurface,
+    border =
+      BorderStroke(
+        1.dp,
+        if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.4f) else extended.readerBorder,
+      ),
     modifier = modifier.fillMaxWidth().testTag("ai_print_layout_banner"),
   ) {
     Row(
@@ -1068,58 +1111,120 @@ private fun AiPrintStatusBanner(
       verticalAlignment = Alignment.Top,
       horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-      if (isPreparing) {
-        CircularProgressIndicator(
-          modifier = Modifier.size(18.dp).padding(top = 2.dp),
-          strokeWidth = 2.dp,
-          color = MaterialTheme.colorScheme.primary,
-        )
-        Text(
-          text = stringResource(R.string.ai_print_optimizing),
-          style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-          color = extended.readerTextPrimary,
-          modifier = Modifier.weight(1f),
-        )
-      } else if (layoutPlan != null) {
-        Icon(
-          imageVector = Icons.Rounded.AutoAwesome,
-          contentDescription = null,
-          tint = AccentGold,
-          modifier = Modifier.size(18.dp),
-        )
-        Column(
-          modifier = Modifier.weight(1f),
-          verticalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-          Text(
-            text = stringResource(R.string.ai_print_badge_label),
-            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+      when (uiState) {
+        AiPrintUiState.Idle -> Unit
+        AiPrintUiState.Loading -> {
+          CircularProgressIndicator(
+            modifier = Modifier.size(18.dp).padding(top = 2.dp),
+            strokeWidth = 2.dp,
             color = MaterialTheme.colorScheme.primary,
           )
           Text(
-            text = layoutPlan.summaryMessage,
-            style = MaterialTheme.typography.bodySmall,
+            text = stringResource(R.string.ai_print_optimizing),
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
             color = extended.readerTextPrimary,
+            modifier = Modifier.weight(1f),
           )
-          if (!layoutPlan.firebaseNotice.isNullOrBlank()) {
+        }
+        is AiPrintUiState.Success -> {
+          val plan = uiState.plan
+          Icon(
+            imageVector = Icons.Rounded.AutoAwesome,
+            contentDescription = null,
+            tint = AccentGold,
+            modifier = Modifier.size(18.dp),
+          )
+          Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+          ) {
             Text(
-              text = layoutPlan.firebaseNotice,
-              style = MaterialTheme.typography.labelSmall,
-              color = extended.readerTextSecondary,
-              modifier = Modifier.testTag("ai_print_firebase_notice"),
+              text = stringResource(R.string.ai_print_badge_label),
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+              color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+              text = plan.summaryMessage,
+              style = MaterialTheme.typography.bodySmall,
+              color = extended.readerTextPrimary,
+            )
+            if (plan.topicTitles.isNotEmpty()) {
+              val preview = plan.topicTitles.take(4).joinToString(" • ")
+              val moreSuffix = if (plan.topicTitles.size > 4) " +${plan.topicTitles.size - 4} more" else ""
+              Text(
+                text = "Topics grouped: $preview$moreSuffix",
+                style = MaterialTheme.typography.labelSmall,
+                color = extended.readerTextSecondary,
+                modifier = Modifier.testTag("ai_print_topics_preview"),
+              )
+            }
+          }
+          IconButton(
+            onClick = onDismiss,
+            modifier = Modifier.minimumInteractiveComponentSize().testTag("dismiss_ai_print_banner"),
+          ) {
+            Icon(
+              imageVector = Icons.Rounded.Close,
+              contentDescription = stringResource(R.string.cd_dismiss_notice),
+              tint = extended.readerTextSecondary,
+              modifier = Modifier.size(18.dp),
             )
           }
         }
-        IconButton(
-          onClick = onDismiss,
-          modifier = Modifier.minimumInteractiveComponentSize().testTag("dismiss_ai_print_banner"),
-        ) {
+        is AiPrintUiState.Error -> {
           Icon(
-            imageVector = Icons.Rounded.Close,
-            contentDescription = stringResource(R.string.cd_dismiss_notice),
-            tint = extended.readerTextSecondary,
+            imageVector = Icons.Rounded.ErrorOutline,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.error,
             modifier = Modifier.size(18.dp),
           )
+          Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            Text(
+              text = stringResource(R.string.ai_print_error_title),
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+              color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Text(
+              text = uiState.message,
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onErrorContainer,
+              modifier = Modifier.testTag("ai_print_error_message"),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              OutlinedButton(
+                onClick = onRetryAi,
+                modifier = Modifier.minimumInteractiveComponentSize().testTag("ai_print_retry_button"),
+              ) {
+                Text(
+                  text = stringResource(R.string.ai_print_retry),
+                  style = MaterialTheme.typography.labelMedium,
+                )
+              }
+              TextButton(
+                onClick = onStandardPrint,
+                modifier = Modifier.minimumInteractiveComponentSize().testTag("ai_print_standard_button"),
+              ) {
+                Text(
+                  text = stringResource(R.string.ai_print_standard),
+                  style = MaterialTheme.typography.labelMedium,
+                )
+              }
+            }
+          }
+          IconButton(
+            onClick = onDismiss,
+            modifier = Modifier.minimumInteractiveComponentSize().testTag("dismiss_ai_print_banner"),
+          ) {
+            Icon(
+              imageVector = Icons.Rounded.Close,
+              contentDescription = stringResource(R.string.cd_dismiss_notice),
+              tint = MaterialTheme.colorScheme.onErrorContainer,
+              modifier = Modifier.size(18.dp),
+            )
+          }
         }
       }
     }
@@ -1459,6 +1564,7 @@ private fun launchPrintWebView(
       preserveAttemptedSnapshot = preserveAttemptedSnapshot,
       applyTopicGrouping = layoutPlan?.keepSectionsTogether ?: true,
       maxUnbrokenTopicHeightPx = layoutPlan?.maxUnbrokenBlockHeightPx ?: 860,
+      aiTopicTitles = layoutPlan?.topicTitles ?: emptyList(),
     )
   printWebView.loadDataWithBaseURL(
     BundledContent.BLOG_BASE_URL,
@@ -1477,6 +1583,7 @@ internal fun buildPrintablePostHtml(
   preserveAttemptedSnapshot: Boolean = false,
   applyTopicGrouping: Boolean = true,
   maxUnbrokenTopicHeightPx: Int = 860,
+  aiTopicTitles: List<String> = emptyList(),
 ): String {
   val frozenTemplateHtml =
     if (preserveAttemptedSnapshot) {
@@ -1486,6 +1593,10 @@ internal fun buildPrintablePostHtml(
       ""
     }
   val maxTopicPx = maxUnbrokenTopicHeightPx.coerceIn(480, 1100)
+  val aiTopicsJson =
+    org.json.JSONArray(aiTopicTitles.map { it.trim() }.filter { it.length >= 2 })
+      .toString()
+      .replace("</", "<\\/")
   return """
     <!DOCTYPE html>
     <html>
@@ -1876,12 +1987,37 @@ internal fun buildPrintablePostHtml(
             });
           }
 
+          var aiRawTopicTitles = $aiTopicsJson;
+          function normalizeTopicText(str) {
+            return (str || '').toLowerCase().replace(/[^a-z0-9\u0900-\u097f]+/g, ' ').trim();
+          }
+          var aiNormalizedTopics = aiRawTopicTitles
+            .map(normalizeTopicText)
+            .filter(function(t) { return t.length >= 3; });
+
+          function matchesAiTopicHeading(node) {
+            if (!aiNormalizedTopics.length || !node || node.nodeType !== 1) return false;
+            var txt = (node.textContent || '').trim();
+            if (txt.length < 3 || txt.length > 160) return false;
+            if (node.querySelectorAll && node.querySelectorAll('p, table, ul, ol, section, article').length > 1) return false;
+            var norm = normalizeTopicText(txt);
+            if (!norm) return false;
+            for (var i = 0; i < aiNormalizedTopics.length; i++) {
+              var target = aiNormalizedTopics[i];
+              if (norm === target || (target.length >= 6 && norm.indexOf(target) !== -1 && norm.length <= target.length + 18)) {
+                return true;
+              }
+            }
+            return false;
+          }
+
           function isTopicHeadingNode(node) {
             if (!node || node.nodeType !== 1) return false;
             var tag = node.tagName;
             if (tag === 'H1' || tag === 'H2' || tag === 'H3' || tag === 'H4') return true;
             var cls = (node.className || '').toString().toLowerCase();
             if (/\b(topic-title|section-title|sub-heading|subheading|heading)\b/.test(cls)) return true;
+            if (matchesAiTopicHeading(node)) return true;
             if (tag === 'P' || tag === 'DIV') {
               var txt = (node.textContent || '').trim();
               if (txt.length >= 3 && txt.length <= 110 && node.children.length === 1) {

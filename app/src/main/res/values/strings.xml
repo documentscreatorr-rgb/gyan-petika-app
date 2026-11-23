@@ -25,8 +25,11 @@
     <string name="cd_bookmark">Toggle bookmark</string>
     <string name="cd_share">Share study note</string>
     <string name="cd_print">Smart AI print study note</string>
-    <string name="ai_print_optimizing">Adjusting print layout by topics…</string>
-    <string name="ai_print_badge_label">AI Print Layout</string>
+    <string name="ai_print_optimizing">Gemini AI is organizing topics for print…</string>
+    <string name="ai_print_badge_label">Gemini AI Print Layout</string>
+    <string name="ai_print_error_title">AI Print Layout Unavailable</string>
+    <string name="ai_print_retry">Retry AI</string>
+    <string name="ai_print_standard">Standard Print</string>
     <string name="cd_dismiss_notice">Dismiss notice</string>
     <string name="cd_font_decrease">Decrease text size</string>
     <string name="cd_font_increase">Increase text size</string>

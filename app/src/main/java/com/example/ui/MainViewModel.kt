@@ -1,13 +1,14 @@
 package com.example.ui
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.AiRepository
 import com.example.data.BundledContent
 import com.example.data.FeedSyncStatus
+import com.example.data.FirebaseAiRepository
 import com.example.data.ListDensity
-import com.example.data.PlaceholderAiRepository
 import com.example.data.PreferencesRepository
 import com.example.data.PrintTopicLayoutPlan
 import com.example.data.StudyPost
@@ -15,14 +16,31 @@ import com.example.data.StudyRepository
 import com.example.data.TextSizePreset
 import com.example.data.UserPreferences
 import com.example.ui.theme.AppThemeMode
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+
+private const val TAG = "MainViewModel"
+
+sealed interface AiPrintUiState {
+  data object Idle : AiPrintUiState
+
+  data object Loading : AiPrintUiState
+
+  data class Success(val plan: PrintTopicLayoutPlan) : AiPrintUiState
+
+  data class Error(val message: String) : AiPrintUiState
+}
 
 data class MainUiState(
   val posts: List<StudyPost> = BundledContent.fallbackPosts,
@@ -126,7 +144,7 @@ data class MainUiState(
 class MainViewModel(application: Application) : AndroidViewModel(application) {
   private val studyRepository = StudyRepository(application)
   private val prefsRepository = PreferencesRepository(application)
-  private val aiRepository: AiRepository = PlaceholderAiRepository()
+  private val aiRepository: AiRepository = FirebaseAiRepository()
 
   private val _posts = MutableStateFlow(BundledContent.fallbackPosts)
   private val _selectedClassFilter = MutableStateFlow("All")
@@ -135,6 +153,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   private val _syncStatus =
     MutableStateFlow(FeedSyncStatus(cachedPostsCount = BundledContent.fallbackPosts.size))
   private val _statusBannerMessage = MutableStateFlow<String?>(null)
+  private val _aiPrintUiState = MutableStateFlow<AiPrintUiState>(AiPrintUiState.Idle)
+  val aiPrintUiState: StateFlow<AiPrintUiState> = _aiPrintUiState.asStateFlow()
+  private var aiPrintJob: Job? = null
 
   val preferences: StateFlow<UserPreferences> =
     prefsRepository.preferencesFlow.stateIn(
@@ -339,8 +360,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     viewModelScope.launch { prefsRepository.setAutoCacheOffline(enabled) }
   }
 
-  suspend fun planSmartPrintLayout(postTitle: String, rawHtml: String): PrintTopicLayoutPlan =
-    aiRepository.planSmartPrintLayout(postTitle = postTitle, rawHtml = rawHtml)
+  fun requestSmartPrintLayout(
+    postTitle: String,
+    rawHtml: String,
+    onPlanReady: (PrintTopicLayoutPlan) -> Unit,
+  ) {
+    aiPrintJob?.cancel()
+    aiPrintJob =
+      viewModelScope.launch {
+        _aiPrintUiState.value = AiPrintUiState.Loading
+        try {
+          val plan =
+            withTimeout(60_000L) {
+              aiRepository.planSmartPrintLayout(postTitle = postTitle, rawHtml = rawHtml)
+            }
+          _aiPrintUiState.value = AiPrintUiState.Success(plan)
+          onPlanReady(plan)
+        } catch (e: TimeoutCancellationException) {
+          Log.e(TAG, "Gemini AI print layout timed out", e)
+          _aiPrintUiState.value =
+            AiPrintUiState.Error(
+              "Gemini AI print optimization timed out after 60 seconds. Please try again."
+            )
+        } catch (e: CancellationException) {
+          throw e
+        } catch (e: Exception) {
+          Log.e(TAG, "Gemini AI print layout failed", e)
+          _aiPrintUiState.value =
+            AiPrintUiState.Error(
+              e.localizedMessage ?: "Failed to optimize print layout with Gemini AI."
+            )
+        }
+      }
+  }
+
+  fun clearAiPrintState() {
+    aiPrintJob?.cancel()
+    aiPrintJob = null
+    _aiPrintUiState.value = AiPrintUiState.Idle
+  }
 
   fun resetDefaults() {
     viewModelScope.launch {
