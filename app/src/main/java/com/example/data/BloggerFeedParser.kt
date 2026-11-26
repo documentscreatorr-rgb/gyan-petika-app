@@ -54,7 +54,8 @@ object BloggerFeedParser {
         ?: entry.optJSONObject("summary")?.optString("\$t").orEmpty()
 
     val publishedRaw = entry.optJSONObject("published")?.optString("\$t").orEmpty()
-    val (shortDate, longDate) = formatPublishedDate(publishedRaw)
+    val publishedEpochMs = parsePublishedEpochMs(publishedRaw)
+    val (shortDate, longDate) = formatPublishedDate(publishedEpochMs)
 
     val authorName =
       entry
@@ -148,6 +149,7 @@ object BloggerFeedParser {
       commentCount = commentCount,
       banner = null,
       isBundled = false,
+      publishedEpochMs = publishedEpochMs,
     )
   }
 
@@ -169,16 +171,38 @@ object BloggerFeedParser {
     return HtmlCompat.fromHtml(noScripts, HtmlCompat.FROM_HTML_MODE_LEGACY).toString()
   }
 
-  private fun formatPublishedDate(raw: String): Pair<String, String> {
+  private fun parsePublishedEpochMs(raw: String): Long {
+    val trimmed = raw.trim()
+    if (trimmed.isBlank()) return 0L
     for (pattern in isoFormats) {
       try {
         val parser = SimpleDateFormat(pattern, Locale.US)
         parser.timeZone = TimeZone.getTimeZone("UTC")
-        val date = parser.parse(raw) ?: continue
-        val shortFmt = SimpleDateFormat("MMM d, yyyy", Locale.US)
-        val longFmt = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.US)
-        return shortFmt.format(date) to longFmt.format(date)
+        val date = parser.parse(trimmed)
+        if (date != null) return date.time
       } catch (_: Exception) {}
+    }
+    val normalized =
+      trimmed
+        .replace(Regex("Z$", RegexOption.IGNORE_CASE), "+0000")
+        .replace(Regex("([+-]\\d{2}):(\\d{2})$"), "$1$2")
+    for (pattern in listOf("yyyy-MM-dd'T'HH:mm:ss.SSSZ", "yyyy-MM-dd'T'HH:mm:ssZ")) {
+      try {
+        val parser = SimpleDateFormat(pattern, Locale.US)
+        parser.timeZone = TimeZone.getTimeZone("UTC")
+        val date = parser.parse(normalized)
+        if (date != null) return date.time
+      } catch (_: Exception) {}
+    }
+    return 0L
+  }
+
+  private fun formatPublishedDate(epochMs: Long): Pair<String, String> {
+    if (epochMs > 0L) {
+      val date = java.util.Date(epochMs)
+      val shortFmt = SimpleDateFormat("MMM d, yyyy", Locale.US)
+      val longFmt = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.US)
+      return shortFmt.format(date) to longFmt.format(date)
     }
     return "Nov 13, 2026" to "Friday, November 13, 2026"
   }
@@ -203,11 +227,13 @@ object BloggerFeedParser {
     val orderedSubjects =
       listOf(
         "Information Technology" to listOf("information technology", "it (402)", "402", "employability", "digital documentation", "spreadsheet", "database management", "entrepreneurship", "health, safety"),
+        "Computer Science" to listOf("computer science", "cs (083)", "code 083", "computer applications"),
         "Mathematics" to listOf("mathematics", "maths", "math"),
         "Science" to listOf("science"),
         "Social Science" to listOf("social science", "sst", "civics"),
         "English" to listOf("english"),
         "Hindi" to listOf("hindi"),
+        "Sanskrit" to listOf("sanskrit"),
         "Physics" to listOf("physics"),
         "Chemistry" to listOf("chemistry"),
         "Biology" to listOf("biology"),

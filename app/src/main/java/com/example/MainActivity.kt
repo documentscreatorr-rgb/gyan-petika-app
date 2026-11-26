@@ -150,7 +150,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun GyanPetikaApp(viewModel: MainViewModel) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-  val aiPrintUiState by viewModel.aiPrintUiState.collectAsStateWithLifecycle()
+  val translateUiState by viewModel.translateUiState.collectAsStateWithLifecycle()
   val navController = rememberNavController()
   val navBackStackEntry by navController.currentBackStackEntryAsState()
   val currentRoute = navBackStackEntry?.destination?.route
@@ -411,7 +411,7 @@ private fun GyanPetikaApp(viewModel: MainViewModel) {
               ArticleReaderScreen(
                 post = post,
                 preferences = uiState.preferences,
-                aiPrintUiState = aiPrintUiState,
+                translateUiState = translateUiState,
                 onBackClick = { navController.popBackStack() },
                 onFontDecrease = { viewModel.stepReaderFontSize(-2) },
                 onFontIncrease = { viewModel.stepReaderFontSize(2) },
@@ -431,8 +431,17 @@ private fun GyanPetikaApp(viewModel: MainViewModel) {
                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                   }
                 },
-                onRequestSmartPrintLayout = viewModel::requestSmartPrintLayout,
-                onClearAiPrintState = viewModel::clearAiPrintState,
+                onTranslatePost = { modeKey, language, title, segments, onTranslated ->
+                  viewModel.translatePost(
+                    postId = post.id,
+                    modeKey = modeKey,
+                    targetLanguage = language,
+                    title = title,
+                    segments = segments,
+                    onTranslated = onTranslated,
+                  )
+                },
+                onResetTranslation = viewModel::resetTranslation,
               )
             }
           }

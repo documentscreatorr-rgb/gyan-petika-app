@@ -152,6 +152,7 @@ class StudyRepository(private val context: Context) {
               put("thumbnailUrl", post.thumbnailUrl ?: "")
               put("commentCount", post.commentCount)
               put("isBundled", post.isBundled)
+              put("publishedEpochMs", post.publishedEpochMs)
             }
           array.put(obj)
         }
@@ -194,6 +195,7 @@ class StudyRepository(private val context: Context) {
               commentCount = obj.optInt("commentCount", 0),
               banner = null,
               isBundled = obj.optBoolean("isBundled", false),
+              publishedEpochMs = obj.optLong("publishedEpochMs", 0L),
             )
           )
         }

@@ -7,13 +7,14 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.AiRepository
 import com.example.data.BundledContent
 import com.example.data.FeedSyncStatus
-import com.example.data.FirebaseAiRepository
 import com.example.data.ListDensity
 import com.example.data.PreferencesRepository
-import com.example.data.PrintTopicLayoutPlan
+import com.example.data.StandardTranslationRepository
 import com.example.data.StudyPost
 import com.example.data.StudyRepository
 import com.example.data.TextSizePreset
+import com.example.data.TranslationLanguage
+import com.example.data.TranslationResult
 import com.example.data.UserPreferences
 import com.example.ui.theme.AppThemeMode
 import kotlinx.coroutines.CancellationException
@@ -32,14 +33,17 @@ import kotlinx.coroutines.withTimeout
 
 private const val TAG = "MainViewModel"
 
-sealed interface AiPrintUiState {
-  data object Idle : AiPrintUiState
+sealed interface TranslateUiState {
+  data object Idle : TranslateUiState
 
-  data object Loading : AiPrintUiState
+  data class Loading(val targetLanguage: TranslationLanguage) : TranslateUiState
 
-  data class Success(val plan: PrintTopicLayoutPlan) : AiPrintUiState
+  data class Success(val result: TranslationResult) : TranslateUiState
 
-  data class Error(val message: String) : AiPrintUiState
+  data class Error(
+    val targetLanguage: TranslationLanguage,
+    val message: String,
+  ) : TranslateUiState
 }
 
 data class MainUiState(
@@ -125,6 +129,17 @@ data class MainUiState(
         }
       }
 
+  fun lastDayNotices(nowMs: Long = System.currentTimeMillis()): List<StudyPost> {
+    val cutoffMs = nowMs - ONE_DAY_MILLIS
+    return noticePosts
+      .filter { post -> post.publishedEpochMs >= cutoffMs }
+      .sortedByDescending { it.publishedEpochMs }
+  }
+
+  private companion object {
+    const val ONE_DAY_MILLIS = 24L * 60L * 60L * 1000L
+  }
+
   val savedPosts: List<StudyPost>
     get() = posts.filter { it.id in preferences.savedPostIds }
 
@@ -144,7 +159,7 @@ data class MainUiState(
 class MainViewModel(application: Application) : AndroidViewModel(application) {
   private val studyRepository = StudyRepository(application)
   private val prefsRepository = PreferencesRepository(application)
-  private val aiRepository: AiRepository = FirebaseAiRepository()
+  private val translationRepository: AiRepository = StandardTranslationRepository()
 
   private val _posts = MutableStateFlow(BundledContent.fallbackPosts)
   private val _selectedClassFilter = MutableStateFlow("All")
@@ -153,9 +168,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   private val _syncStatus =
     MutableStateFlow(FeedSyncStatus(cachedPostsCount = BundledContent.fallbackPosts.size))
   private val _statusBannerMessage = MutableStateFlow<String?>(null)
-  private val _aiPrintUiState = MutableStateFlow<AiPrintUiState>(AiPrintUiState.Idle)
-  val aiPrintUiState: StateFlow<AiPrintUiState> = _aiPrintUiState.asStateFlow()
-  private var aiPrintJob: Job? = null
+  private val _translateUiState = MutableStateFlow<TranslateUiState>(TranslateUiState.Idle)
+  val translateUiState: StateFlow<TranslateUiState> = _translateUiState.asStateFlow()
+  private var translateJob: Job? = null
+  private val translationCache = mutableMapOf<String, TranslationResult>()
 
   val preferences: StateFlow<UserPreferences> =
     prefsRepository.preferencesFlow.stateIn(
@@ -360,44 +376,61 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     viewModelScope.launch { prefsRepository.setAutoCacheOffline(enabled) }
   }
 
-  fun requestSmartPrintLayout(
-    postTitle: String,
-    rawHtml: String,
-    onPlanReady: (PrintTopicLayoutPlan) -> Unit,
+  fun translatePost(
+    postId: String,
+    modeKey: String,
+    targetLanguage: TranslationLanguage,
+    title: String,
+    segments: List<String>,
+    onTranslated: (TranslationResult) -> Unit,
   ) {
-    aiPrintJob?.cancel()
-    aiPrintJob =
+    val cacheKey = "$postId|$modeKey|${targetLanguage.code}|${segments.size}"
+    translationCache[cacheKey]?.let { cached ->
+      _translateUiState.value = TranslateUiState.Success(cached)
+      onTranslated(cached)
+      return
+    }
+
+    translateJob?.cancel()
+    translateJob =
       viewModelScope.launch {
-        _aiPrintUiState.value = AiPrintUiState.Loading
+        _translateUiState.value = TranslateUiState.Loading(targetLanguage)
         try {
-          val plan =
-            withTimeout(60_000L) {
-              aiRepository.planSmartPrintLayout(postTitle = postTitle, rawHtml = rawHtml)
+          val result =
+            withTimeout(30_000L) {
+              translationRepository.translatePostSegments(
+                targetLanguage = targetLanguage,
+                title = title,
+                segments = segments,
+              )
             }
-          _aiPrintUiState.value = AiPrintUiState.Success(plan)
-          onPlanReady(plan)
+          translationCache[cacheKey] = result
+          _translateUiState.value = TranslateUiState.Success(result)
+          onTranslated(result)
         } catch (e: TimeoutCancellationException) {
-          Log.e(TAG, "Gemini AI print layout timed out", e)
-          _aiPrintUiState.value =
-            AiPrintUiState.Error(
-              "Gemini AI print optimization timed out after 60 seconds. Please try again."
+          Log.e(TAG, "Post translation timed out", e)
+          _translateUiState.value =
+            TranslateUiState.Error(
+              targetLanguage = targetLanguage,
+              message = "Translation timed out. Please check your connection and try again.",
             )
         } catch (e: CancellationException) {
           throw e
         } catch (e: Exception) {
-          Log.e(TAG, "Gemini AI print layout failed", e)
-          _aiPrintUiState.value =
-            AiPrintUiState.Error(
-              e.localizedMessage ?: "Failed to optimize print layout with Gemini AI."
+          Log.e(TAG, "Post translation failed", e)
+          _translateUiState.value =
+            TranslateUiState.Error(
+              targetLanguage = targetLanguage,
+              message = e.localizedMessage ?: "Failed to translate post. Please try again.",
             )
         }
       }
   }
 
-  fun clearAiPrintState() {
-    aiPrintJob?.cancel()
-    aiPrintJob = null
-    _aiPrintUiState.value = AiPrintUiState.Idle
+  fun resetTranslation() {
+    translateJob?.cancel()
+    translateJob = null
+    _translateUiState.value = TranslateUiState.Idle
   }
 
   fun resetDefaults() {

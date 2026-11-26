@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.print.PrintAttributes
 import android.print.PrintManager
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
@@ -19,8 +20,15 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,35 +45,38 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Comment
 import androidx.compose.material.icons.outlined.BookmarkBorder
-import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bookmark
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Contrast
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Print
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -76,9 +87,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -88,10 +99,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import com.example.R
 import com.example.data.BundledContent
-import com.example.data.PrintTopicLayoutPlan
 import com.example.data.StudyPost
+import com.example.data.TranslationLanguage
+import com.example.data.TranslationLanguages
+import com.example.data.TranslationResult
 import com.example.data.UserPreferences
-import com.example.ui.AiPrintUiState
+import com.example.ui.TranslateUiState
 import com.example.ui.components.ArticleBlock
 import com.example.ui.components.ArticleHtmlParser
 import com.example.ui.theme.AccentGold
@@ -101,12 +114,14 @@ import com.example.ui.theme.HeroGradientMid
 import com.example.ui.theme.HeroGradientStart
 import com.example.ui.theme.LocalGyanExtendedColors
 import com.example.ui.theme.PrimaryNavy
+import org.json.JSONArray
+import org.json.JSONObject
 
 @Composable
 fun ArticleReaderScreen(
   post: StudyPost,
   preferences: UserPreferences,
-  aiPrintUiState: AiPrintUiState = AiPrintUiState.Idle,
+  translateUiState: TranslateUiState = TranslateUiState.Idle,
   onBackClick: () -> Unit,
   onFontDecrease: () -> Unit,
   onFontIncrease: () -> Unit,
@@ -114,25 +129,43 @@ fun ArticleReaderScreen(
   onToggleBookmark: () -> Unit,
   onLabelClick: (String) -> Unit,
   onInternalPostLinkClick: (String) -> Unit,
-  onRequestSmartPrintLayout: (String, String, (PrintTopicLayoutPlan) -> Unit) -> Unit = { _, _, _ -> },
-  onClearAiPrintState: () -> Unit = {},
+  onTranslatePost: (
+    modeKey: String,
+    language: TranslationLanguage,
+    title: String,
+    segments: List<String>,
+    onTranslated: (TranslationResult) -> Unit,
+  ) -> Unit = { _, _, _, _, _ -> },
+  onResetTranslation: () -> Unit = {},
   modifier: Modifier = Modifier,
 ) {
   val context = LocalContext.current
   val extended = LocalGyanExtendedColors.current
+  val readerScrollState = rememberScrollState()
   val isSaved = post.id in preferences.savedPostIds
   val baseFontSp = preferences.customFontSizeSp
   var useFullPostView by rememberSaveable(post.id) { mutableStateOf(true) }
   var activePostWebView by remember(post.id) { mutableStateOf<WebView?>(null) }
   var isDispatchingPrint by remember(post.id) { mutableStateOf(false) }
-  var lastCapturedSnapshot by remember(post.id) { mutableStateOf<PrintableSnapshot?>(null) }
+  var showTranslateSheet by remember(post.id) { mutableStateOf(false) }
+  var translatedCleanBlocks by remember(post.id) { mutableStateOf<List<ArticleBlock>?>(null) }
+  var isTopNavVisible by rememberSaveable(post.id) { mutableStateOf(true) }
   val cleanBlocks = remember(post.id, post.htmlContent) { ArticleHtmlParser.parse(post) }
-  val isPreparingAiPrint = aiPrintUiState is AiPrintUiState.Loading || isDispatchingPrint
+  val isTranslating = translateUiState is TranslateUiState.Loading
+  val activeTranslationLanguage =
+    (translateUiState as? TranslateUiState.Success)?.result?.targetLanguage
+  val displayTitle =
+    (translateUiState as? TranslateUiState.Success)?.result?.translatedTitle ?: post.title
+
+  fun toggleTopNav() {
+    isTopNavVisible = !isTopNavVisible
+  }
 
   DisposableEffect(post.id) {
-    onClearAiPrintState()
+    onResetTranslation()
+    translatedCleanBlocks = null
     onDispose {
-      onClearAiPrintState()
+      onResetTranslation()
     }
   }
 
@@ -145,241 +178,317 @@ fun ArticleReaderScreen(
     }
   }
 
-  fun startAiSmartPrint() {
-    if (isPreparingAiPrint) return
-    capturePrintableSnapshot(
-      post = post,
-      liveWebView = if (useFullPostView) activePostWebView else null,
-    ) { snapshot ->
-      lastCapturedSnapshot = snapshot
-      onRequestSmartPrintLayout(post.title, snapshot.rawHtml) { plan ->
-        isDispatchingPrint = true
-        launchPrintWebView(
-          context = context,
-          post = post,
-          rawHtml = snapshot.rawHtml,
-          extraHeadStyles = snapshot.extraHeadStyles,
-          preserveAttemptedSnapshot = snapshot.preserveAttemptedSnapshot,
-          layoutPlan = plan,
-          onPrintDispatched = { isDispatchingPrint = false },
-        )
+  fun restoreOriginalLanguage() {
+    translatedCleanBlocks = null
+    activePostWebView?.evaluateJavascript(
+      "window.gpRestoreOriginalTexts && window.gpRestoreOriginalTexts();",
+      null,
+    )
+    onResetTranslation()
+  }
+
+  fun translateCurrentPost(language: TranslationLanguage) {
+    if (useFullPostView) {
+      val webView = activePostWebView
+      if (webView != null) {
+        webView.evaluateJavascript(
+          "window.gpExtractTranslatableSegments ? window.gpExtractTranslatableSegments() : '[]'"
+        ) { rawResult ->
+          val segments = parseJsStringArray(rawResult)
+          onTranslatePost("html", language, post.title, segments) { result ->
+            val escapedJson = JSONArray(result.translatedSegments).toString()
+            webView.evaluateJavascript(
+              "window.gpApplyTranslatedSegments && window.gpApplyTranslatedSegments($escapedJson);",
+              null,
+            )
+          }
+        }
+        return
       }
+    }
+
+    val nonBannerBlocks = cleanBlocks.filterNot { it is ArticleBlock.HeroBannerBlock }
+    val segments = extractCleanBlockSegments(nonBannerBlocks)
+    onTranslatePost("clean", language, post.title, segments) { result ->
+      translatedCleanBlocks =
+        applyCleanBlockTranslations(nonBannerBlocks, result.translatedSegments)
     }
   }
 
   fun startStandardPrint() {
     if (isDispatchingPrint) return
-    val cached = lastCapturedSnapshot
-    val dispatch: (PrintableSnapshot) -> Unit = { snapshot ->
-      isDispatchingPrint = true
+    isDispatchingPrint = true
+    capturePrintableSnapshot(
+      post = post,
+      liveWebView = if (useFullPostView) activePostWebView else null,
+    ) { snapshot ->
       launchPrintWebView(
         context = context,
         post = post,
         rawHtml = snapshot.rawHtml,
         extraHeadStyles = snapshot.extraHeadStyles,
         preserveAttemptedSnapshot = snapshot.preserveAttemptedSnapshot,
-        layoutPlan = null,
         onPrintDispatched = { isDispatchingPrint = false },
-      )
-    }
-    if (cached != null) {
-      dispatch(cached)
-    } else {
-      capturePrintableSnapshot(
-        post = post,
-        liveWebView = if (useFullPostView) activePostWebView else null,
-        onCaptured = dispatch,
       )
     }
   }
 
-  Column(
+  Box(
     modifier = modifier.fillMaxSize().background(extended.readerBackground),
   ) {
-    ReaderFloatingToolbar(
-      isSaved = isSaved,
-      isPaperMode = preferences.eyeComfortPaperMode,
-      isPreparingPrint = isPreparingAiPrint,
-      onBackClick = onBackClick,
-      onFontDecrease = onFontDecrease,
-      onFontIncrease = onFontIncrease,
-      onTogglePaperMode = onTogglePaperMode,
-      onToggleBookmark = onToggleBookmark,
-      onPrintClick = { startAiSmartPrint() },
-      onShareClick = { shareStudyPost(context, post) },
-    )
+    Column(modifier = Modifier.fillMaxSize()) {
+      // Top Navigation Bar: toggles smoothly on single tap; keeps WebView & sticky MCQ timer below it when visible.
+      AnimatedVisibility(
+        visible = isTopNavVisible,
+        enter = expandVertically(animationSpec = tween(220)) + fadeIn(tween(220)),
+        exit = shrinkVertically(animationSpec = tween(220)) + fadeOut(tween(220)),
+        modifier = Modifier.fillMaxWidth().testTag("reader_top_navigation"),
+      ) {
+        Column(
+          modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          ReaderFloatingToolbar(
+            isSaved = isSaved,
+            isPaperMode = preferences.eyeComfortPaperMode,
+            isTranslating = isTranslating,
+            isTranslated = activeTranslationLanguage != null,
+            isPreparingPrint = isDispatchingPrint,
+            onBackClick = onBackClick,
+            onFontDecrease = onFontDecrease,
+            onFontIncrease = onFontIncrease,
+            onTranslateClick = { showTranslateSheet = true },
+            onTogglePaperMode = onTogglePaperMode,
+            onToggleBookmark = onToggleBookmark,
+            onPrintClick = { startStandardPrint() },
+            onShareClick = { shareStudyPost(context, post) },
+          )
 
-    AnimatedVisibility(visible = aiPrintUiState !is AiPrintUiState.Idle) {
-      AiPrintStatusBanner(
-        uiState = aiPrintUiState,
-        onRetryAi = { startAiSmartPrint() },
-        onStandardPrint = {
-          onClearAiPrintState()
-          startStandardPrint()
-        },
-        onDismiss = onClearAiPrintState,
-        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+          AnimatedVisibility(visible = translateUiState !is TranslateUiState.Idle) {
+            TranslateStatusBanner(
+              uiState = translateUiState,
+              onRestoreOriginal = { restoreOriginalLanguage() },
+              onRetry = { lang -> translateCurrentPost(lang) },
+              onDismiss = {
+                if (translateUiState is TranslateUiState.Error) {
+                  onResetTranslation()
+                } else {
+                  restoreOriginalLanguage()
+                }
+              },
+            )
+          }
+        }
+      }
+
+      Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+        if (useFullPostView) {
+          FullPostHtmlWebView(
+            post = post,
+            displayTitle = displayTitle,
+            fontSizeSp = baseFontSp,
+            isDark = extended.isDark,
+            isPaperMode = extended.isPaperMode,
+            isTopNavVisible = isTopNavVisible,
+            onLabelClick = onLabelClick,
+            onInternalPostLinkClick = onInternalPostLinkClick,
+            onWebViewReady = { activePostWebView = it },
+            onSwitchToCleanReader = {
+              useFullPostView = false
+              restoreOriginalLanguage()
+            },
+            onToggleTopNav = ::toggleTopNav,
+            modifier = Modifier.fillMaxSize(),
+          )
+        } else {
+          Column(
+            modifier =
+              Modifier.fillMaxSize()
+                .verticalScroll(readerScrollState)
+                .pointerInput(post.id) {
+                  detectTapGestures(onTap = { toggleTopNav() })
+                }
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+          ) {
+            ArticleMetadataHeader(
+              post = post,
+              displayTitle = displayTitle,
+              baseFontSp = baseFontSp,
+              useFullPostView = false,
+              onSelectFullPost = {
+                useFullPostView = true
+                restoreOriginalLanguage()
+              },
+              onSelectCleanReader = {},
+            )
+
+            if (post.banner != null) {
+              UnitHeroBanner(block = ArticleBlock.HeroBannerBlock(post.banner))
+            }
+
+            val blocksToRender =
+              translatedCleanBlocks ?: cleanBlocks.filterNot { it is ArticleBlock.HeroBannerBlock }
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+              blocksToRender.forEach { block ->
+                RenderCleanBlock(block = block, baseFontSp = baseFontSp, postTitle = displayTitle)
+              }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+          }
+        }
+      }
+    }
+
+    if (extended.isPaperMode) {
+      Box(
+        modifier =
+          Modifier.matchParentSize()
+            .background(
+              if (extended.isDark) Color(0x12FFB74D)
+              else Color(0x0DFFB74D)
+            )
+            .testTag("eye_comfort_shield_overlay"),
       )
     }
 
-    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-      Column(
-        modifier =
-          Modifier.fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+    if (showTranslateSheet) {
+      TranslateLanguageBottomSheet(
+        selectedLanguage = activeTranslationLanguage,
+        onSelectOriginal = {
+          showTranslateSheet = false
+          restoreOriginalLanguage()
+        },
+        onSelectLanguage = { language ->
+          showTranslateSheet = false
+          translateCurrentPost(language)
+        },
+        onDismiss = { showTranslateSheet = false },
+      )
+    }
+  }
+}
+
+@Composable
+private fun ArticleMetadataHeader(
+  post: StudyPost,
+  displayTitle: String,
+  baseFontSp: Int,
+  useFullPostView: Boolean,
+  onSelectFullPost: () -> Unit,
+  onSelectCleanReader: () -> Unit,
+) {
+  val extended = LocalGyanExtendedColors.current
+  Column(modifier = Modifier.fillMaxWidth()) {
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = PrimaryNavy.copy(alpha = if (extended.isDark) 0.4f else 0.1f),
       ) {
-      // Metadata Header
-      Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-          Surface(
-            shape = RoundedCornerShape(999.dp),
-            color = PrimaryNavy.copy(alpha = if (extended.isDark) 0.4f else 0.1f),
-          ) {
-            Text(
-              text = post.classTag,
-              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-              color = if (extended.isDark) Color(0xFF93C5FD) else PrimaryNavy,
-              modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-            )
-          }
-          Surface(
-            shape = RoundedCornerShape(999.dp),
-            color = BadgePurple.copy(alpha = 0.12f),
-          ) {
-            Text(
-              text = post.subjectTag,
-              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-              color = if (extended.isDark) Color(0xFFC4B5FD) else BadgePurple,
-              modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-            )
-          }
+        Text(
+          text = post.classTag,
+          style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+          color = if (extended.isDark) Color(0xFF93C5FD) else PrimaryNavy,
+          modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+      }
+      Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = BadgePurple.copy(alpha = 0.12f),
+      ) {
+        Text(
+          text = post.subjectTag,
+          style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+          color = if (extended.isDark) Color(0xFFC4B5FD) else BadgePurple,
+          modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+      }
+      Text(
+        text = "• ${post.estimatedReadTime}",
+        style = MaterialTheme.typography.labelSmall,
+        color = extended.readerTextSecondary,
+      )
+    }
+
+    Spacer(modifier = Modifier.height(10.dp))
+
+    Text(
+      text = displayTitle,
+      style =
+        MaterialTheme.typography.headlineMedium.copy(
+          fontSize = (baseFontSp + 7).sp,
+          lineHeight = (baseFontSp + 14).sp,
+          fontWeight = FontWeight.ExtraBold,
+        ),
+      color = extended.readerTextPrimary,
+    )
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+          imageVector = Icons.Rounded.Person,
+          contentDescription = null,
+          tint = extended.readerTextSecondary,
+          modifier = Modifier.size(14.dp),
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+          text = "${post.authorName} • ${post.fullPublishedDate}",
+          style = MaterialTheme.typography.bodySmall,
+          color = extended.readerTextSecondary,
+        )
+      }
+
+      if (post.commentCount > 0) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(
+            imageVector = Icons.AutoMirrored.Rounded.Comment,
+            contentDescription = null,
+            tint = extended.readerTextSecondary,
+            modifier = Modifier.size(14.dp),
+          )
+          Spacer(modifier = Modifier.width(4.dp))
           Text(
-            text = "• ${post.estimatedReadTime}",
+            text = "${post.commentCount}",
             style = MaterialTheme.typography.labelSmall,
             color = extended.readerTextSecondary,
           )
         }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        Text(
-          text = post.title,
-          style =
-            MaterialTheme.typography.headlineMedium.copy(
-              fontSize = (baseFontSp + 7).sp,
-              lineHeight = (baseFontSp + 14).sp,
-              fontWeight = FontWeight.ExtraBold,
-            ),
-          color = extended.readerTextPrimary,
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-              imageVector = Icons.Rounded.Person,
-              contentDescription = null,
-              tint = extended.readerTextSecondary,
-              modifier = Modifier.size(14.dp),
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-              text = "${post.authorName} • ${post.fullPublishedDate}",
-              style = MaterialTheme.typography.bodySmall,
-              color = extended.readerTextSecondary,
-            )
-          }
-
-          if (post.commentCount > 0) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Icon(
-                imageVector = Icons.AutoMirrored.Rounded.Comment,
-                contentDescription = null,
-                tint = extended.readerTextSecondary,
-                modifier = Modifier.size(14.dp),
-              )
-              Spacer(modifier = Modifier.width(4.dp))
-              Text(
-                text = "${post.commentCount}",
-                style = MaterialTheme.typography.labelSmall,
-                color = extended.readerTextSecondary,
-              )
-            }
-          }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Full Post vs Clean Reader Mode Switcher
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-          ViewModeChip(
-            label = "Full Post (Rich HTML)",
-            selected = useFullPostView,
-            onClick = { useFullPostView = true },
-            modifier = Modifier.weight(1f).testTag("mode_full_post"),
-          )
-          ViewModeChip(
-            label = "Clean Reader",
-            selected = !useFullPostView,
-            onClick = { useFullPostView = false },
-            modifier = Modifier.weight(1f).testTag("mode_clean_reader"),
-          )
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-        HorizontalDivider(color = extended.readerBorder)
-      }
-
-      if (post.banner != null) {
-        UnitHeroBanner(block = ArticleBlock.HeroBannerBlock(post.banner))
-      }
-
-      if (useFullPostView) {
-        FullPostHtmlWebView(
-          post = post,
-          fontSizeSp = baseFontSp,
-          isDark = extended.isDark,
-          isPaperMode = extended.isPaperMode,
-          onLabelClick = onLabelClick,
-          onInternalPostLinkClick = onInternalPostLinkClick,
-          onWebViewReady = { activePostWebView = it },
-        )
-      } else {
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-          cleanBlocks.filterNot { it is ArticleBlock.HeroBannerBlock }.forEach { block ->
-            RenderCleanBlock(block = block, baseFontSp = baseFontSp, postTitle = post.title)
-          }
-        }
-      }
-
-      Spacer(modifier = Modifier.height(18.dp))
-    }
-
-      if (extended.isPaperMode) {
-        Box(
-          modifier =
-            Modifier.matchParentSize()
-              .background(
-                if (extended.isDark) Color(0x12FFB74D)
-                else Color(0x0DFFB74D)
-              )
-              .testTag("eye_comfort_shield_overlay"),
-        )
       }
     }
+
+    Spacer(modifier = Modifier.height(10.dp))
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      ViewModeChip(
+        label = "Full Post (Rich HTML)",
+        selected = useFullPostView,
+        onClick = onSelectFullPost,
+        modifier = Modifier.weight(1f).testTag("mode_full_post"),
+      )
+      ViewModeChip(
+        label = "Clean Reader",
+        selected = !useFullPostView,
+        onClick = onSelectCleanReader,
+        modifier = Modifier.weight(1f).testTag("mode_clean_reader"),
+      )
+    }
+
+    Spacer(modifier = Modifier.height(10.dp))
+    HorizontalDivider(color = extended.readerBorder)
   }
 }
 
@@ -387,16 +496,19 @@ fun ArticleReaderScreen(
 @Composable
 private fun FullPostHtmlWebView(
   post: StudyPost,
+  displayTitle: String,
   fontSizeSp: Int,
   isDark: Boolean,
   isPaperMode: Boolean,
+  isTopNavVisible: Boolean,
   onLabelClick: (String) -> Unit,
   onInternalPostLinkClick: (String) -> Unit,
   onWebViewReady: (WebView?) -> Unit,
+  onSwitchToCleanReader: () -> Unit,
+  onToggleTopNav: () -> Unit,
+  modifier: Modifier = Modifier,
 ) {
   val context = LocalContext.current
-  val density = LocalDensity.current.density
-  var contentHeightPx by remember(post.id) { mutableIntStateOf((320 * density).toInt()) }
 
   val bgHex =
     when {
@@ -427,6 +539,7 @@ private fun FullPostHtmlWebView(
       else -> "#E2E8F0"
     }
 
+  val latestDisplayTitle by rememberUpdatedState(displayTitle)
   val latestFontSizeSp by rememberUpdatedState(fontSizeSp)
   val latestBgHex by rememberUpdatedState(bgHex)
   val latestTextHex by rememberUpdatedState(textHex)
@@ -436,6 +549,8 @@ private fun FullPostHtmlWebView(
   val latestIsPaperMode by rememberUpdatedState(isPaperMode)
   val latestOnLabelClick by rememberUpdatedState(onLabelClick)
   val latestOnInternalPostLinkClick by rememberUpdatedState(onInternalPostLinkClick)
+  val latestOnSwitchToCleanReader by rememberUpdatedState(onSwitchToCleanReader)
+  val latestOnToggleTopNav by rememberUpdatedState(onToggleTopNav)
 
   val wrappedHtml =
     remember(post.id, post.htmlContent) {
@@ -448,30 +563,41 @@ private fun FullPostHtmlWebView(
         borderHex = borderHex,
         isDark = isDark,
         isPaperMode = isPaperMode,
+        post = post,
+        displayTitle = displayTitle,
       )
     }
 
-  val minHeightDp = with(LocalDensity.current) { contentHeightPx.toDp() }.coerceAtLeast(240.dp)
-
   Surface(
-    shape = RoundedCornerShape(16.dp),
+    shape = RoundedCornerShape(if (isTopNavVisible) 16.dp else 0.dp),
     color = Color.Transparent,
-    border = BorderStroke(1.dp, LocalGyanExtendedColors.current.readerBorder),
-    modifier = Modifier.fillMaxWidth(),
+    border =
+      if (isTopNavVisible) BorderStroke(1.dp, LocalGyanExtendedColors.current.readerBorder)
+      else null,
+    modifier =
+      modifier
+        .padding(
+          start = if (isTopNavVisible) 8.dp else 0.dp,
+          end = if (isTopNavVisible) 8.dp else 0.dp,
+          bottom = if (isTopNavVisible) 8.dp else 0.dp,
+        ),
   ) {
     AndroidView(
-      modifier = Modifier.fillMaxWidth().height(minHeightDp).clip(RoundedCornerShape(16.dp)),
+      modifier =
+        Modifier.fillMaxSize()
+          .clip(RoundedCornerShape(if (isTopNavVisible) 16.dp else 0.dp)),
       factory = { ctx ->
         WebView(ctx).apply {
           layoutParams =
             ViewGroup.LayoutParams(
               ViewGroup.LayoutParams.MATCH_PARENT,
-              ViewGroup.LayoutParams.WRAP_CONTENT,
+              ViewGroup.LayoutParams.MATCH_PARENT,
             )
           setBackgroundColor(AndroidColor.TRANSPARENT)
-          isVerticalScrollBarEnabled = false
+          isVerticalScrollBarEnabled = true
           isHorizontalScrollBarEnabled = false
-          isNestedScrollingEnabled = false
+          isNestedScrollingEnabled = true
+          overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
 
           settings.apply {
             javaScriptEnabled = true
@@ -487,11 +613,13 @@ private fun FullPostHtmlWebView(
           addJavascriptInterface(
             object {
               @JavascriptInterface
-              fun onHeightChanged(heightCssPx: Float) {
-                val nextPx = (heightCssPx * density + 24f).toInt()
-                if (nextPx > 120) {
-                  post { contentHeightPx = nextPx }
-                }
+              fun onSwitchToCleanReader() {
+                post { latestOnSwitchToCleanReader() }
+              }
+
+              @JavascriptInterface
+              fun onToggleTopNav() {
+                post { latestOnToggleTopNav() }
               }
             },
             "GyanBridge",
@@ -535,19 +663,13 @@ private fun FullPostHtmlWebView(
                 val themeJs =
                   "window.gpApplyTheme && window.gpApplyTheme($latestFontSizeSp, '$latestBgHex', '$latestTextHex', '$latestCardBgHex', '$latestBorderHex', $latestIsDark, $latestIsPaperMode);"
                 view?.evaluateJavascript(themeJs, null)
+                val quotedTitle = JSONObject.quote(latestDisplayTitle)
                 view?.evaluateJavascript(
-                  """
-                  (function() {
-                    function report() {
-                      if (window.GyanBridge && document.body) {
-                        GyanBridge.onHeightChanged(document.documentElement.scrollHeight || document.body.scrollHeight);
-                      }
-                    }
-                    report();
-                    setTimeout(report, 250);
-                    setTimeout(report, 800);
-                  })();
-                  """.trimIndent(),
+                  "window.gpSetArticleTitle && window.gpSetArticleTitle($quotedTitle);",
+                  null,
+                )
+                view?.evaluateJavascript(
+                  "window.gpDiscoverStickyBars && window.gpDiscoverStickyBars();",
                   null,
                 )
               }
@@ -567,12 +689,31 @@ private fun FullPostHtmlWebView(
         val js =
           "window.gpApplyTheme && window.gpApplyTheme($fontSizeSp, '$bgHex', '$textHex', '$cardBgHex', '$borderHex', $isDark, $isPaperMode);"
         webView.evaluateJavascript(js, null)
+        val quotedTitle = JSONObject.quote(displayTitle)
+        webView.evaluateJavascript(
+          "window.gpSetArticleTitle && window.gpSetArticleTitle($quotedTitle);",
+          null,
+        )
       },
     )
   }
 }
 
-private fun buildRichPostHtml(
+private fun escapeHtml(text: String): String =
+  buildString(text.length) {
+    for (ch in text) {
+      when (ch) {
+        '&' -> append("&amp;")
+        '<' -> append("&lt;")
+        '>' -> append("&gt;")
+        '"' -> append("&quot;")
+        '\'' -> append("&#39;")
+        else -> append(ch)
+      }
+    }
+  }
+
+internal fun buildRichPostHtml(
   rawHtml: String,
   fontSizeSp: Int,
   bgHex: String,
@@ -581,8 +722,54 @@ private fun buildRichPostHtml(
   borderHex: String,
   isDark: Boolean,
   isPaperMode: Boolean,
+  post: StudyPost? = null,
+  displayTitle: String = post?.title.orEmpty(),
 ): String {
   val rootClass = if (isPaperMode) " class=\"gp-eye-comfort\"" else ""
+  val headerHtml =
+    if (post != null) {
+      val commentBadge =
+        if (post.commentCount > 0) {
+          "<span class=\"gp-hdr-comments\">&#128172; ${post.commentCount}</span>"
+        } else {
+          ""
+        }
+      val bannerHtml =
+        post.banner?.let { banner ->
+          """
+          <div class="gp-hero-banner">
+            <div class="gp-hero-eyebrow">${escapeHtml(banner.eyebrow)}</div>
+            <div class="gp-hero-headline">${escapeHtml(banner.headline)}</div>
+            <div class="gp-hero-sub">${escapeHtml(banner.subheadline)}</div>
+            <div class="gp-hero-summary">${escapeHtml(banner.summary)}</div>
+          </div>
+          """.trimIndent()
+        } ?: ""
+
+      """
+      <header id="gp-native-header">
+        <div class="gp-hdr-pills">
+          <span class="gp-pill-class">${escapeHtml(post.classTag)}</span>
+          <span class="gp-pill-subject">${escapeHtml(post.subjectTag)}</span>
+          <span class="gp-hdr-read-time">&bull; ${escapeHtml(post.estimatedReadTime)}</span>
+        </div>
+        <h1 id="gp-article-title">${escapeHtml(displayTitle)}</h1>
+        <div class="gp-hdr-meta">
+          <span>&#128100; ${escapeHtml(post.authorName)} &bull; ${escapeHtml(post.fullPublishedDate)}</span>
+          $commentBadge
+        </div>
+        <div class="gp-mode-row">
+          <button type="button" class="gp-mode-chip gp-mode-selected" disabled>Full Post (Rich HTML)</button>
+          <button type="button" class="gp-mode-chip" onclick="window.GyanBridge && window.GyanBridge.onSwitchToCleanReader()">Clean Reader</button>
+        </div>
+        <hr class="gp-hdr-divider" />
+        $bannerHtml
+      </header>
+      """.trimIndent()
+    } else {
+      ""
+    }
+
   return """
     <!DOCTYPE html>
     <html$rootClass>
@@ -596,6 +783,7 @@ private fun buildRichPostHtml(
           --gp-card: $cardBgHex;
           --gp-border: $borderHex;
           --gp-font-size: ${fontSizeSp}px;
+          --gp-dark: ${if (isDark) "1" else "0"};
         }
         * { box-sizing: border-box; max-width: 100%; }
         html, body {
@@ -606,10 +794,113 @@ private fun buildRichPostHtml(
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
           font-size: var(--gp-font-size);
           line-height: 1.65;
-          overflow-x: hidden;
+          overflow-x: clip;
           word-wrap: break-word;
         }
-        body { padding: 10px 8px; }
+        body { padding: 8px 8px 18px 8px; }
+        #gp-native-header {
+          margin-bottom: 12px;
+        }
+        .gp-hdr-pills {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 8px;
+        }
+        .gp-pill-class {
+          display: inline-block;
+          padding: 4px 10px;
+          border-radius: 999px;
+          font-size: 11px;
+          font-weight: 700;
+          background: ${if (isDark) "rgba(15, 52, 91, 0.45)" else "rgba(15, 52, 91, 0.10)"};
+          color: ${if (isDark) "#93C5FD" else "#0F345B"};
+        }
+        .gp-pill-subject {
+          display: inline-block;
+          padding: 4px 10px;
+          border-radius: 999px;
+          font-size: 11px;
+          font-weight: 700;
+          background: rgba(109, 40, 217, 0.12);
+          color: ${if (isDark) "#C4B5FD" else "#6D28D9"};
+        }
+        .gp-hdr-read-time {
+          font-size: 11px;
+          opacity: 0.75;
+        }
+        #gp-article-title {
+          margin: 10px 0 8px 0;
+          font-size: calc(var(--gp-font-size) + 7px);
+          line-height: 1.3;
+          font-weight: 800;
+          color: var(--gp-text);
+        }
+        .gp-hdr-meta {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          font-size: 12px;
+          opacity: 0.78;
+        }
+        .gp-mode-row {
+          display: flex;
+          gap: 8px;
+          margin-top: 10px;
+        }
+        .gp-mode-chip {
+          flex: 1 1 0;
+          min-height: 44px;
+          padding: 8px 10px;
+          border-radius: 10px;
+          border: 1px solid var(--gp-border);
+          background: var(--gp-card);
+          color: var(--gp-text);
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          opacity: 1;
+        }
+        .gp-mode-chip.gp-mode-selected {
+          background: #0F345B;
+          border-color: #0F345B;
+          color: #FFFFFF;
+        }
+        .gp-hdr-divider {
+          border: 0;
+          border-top: 1px solid var(--gp-border);
+          margin: 10px 0 12px 0;
+        }
+        .gp-hero-banner {
+          border-radius: 18px;
+          padding: 18px;
+          background: linear-gradient(135deg, #0F345B 0%, #1B4E84 55%, #2563EB 100%);
+          color: #FFFFFF;
+          margin-bottom: 12px;
+        }
+        .gp-hero-eyebrow {
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.8px;
+          opacity: 0.9;
+        }
+        .gp-hero-headline {
+          font-size: 20px;
+          font-weight: 800;
+          margin-top: 6px;
+        }
+        .gp-hero-sub {
+          font-size: 14px;
+          font-weight: 600;
+          color: #F5B82E;
+          margin-top: 4px;
+        }
+        .gp-hero-summary {
+          font-size: 12px;
+          opacity: 0.9;
+          margin-top: 8px;
+        }
         html.gp-eye-comfort #gp-post-root {
           filter: sepia(0.06) brightness(0.985) contrast(0.98);
         }
@@ -689,7 +980,7 @@ private fun buildRichPostHtml(
           background: var(--gp-card);
         }
         summary { font-weight: 700; cursor: pointer; }
-        button {
+        :where(#gp-post-root button) {
           padding: 8px 14px;
           border-radius: 8px;
           border: 1px solid var(--gp-border);
@@ -698,14 +989,29 @@ private fun buildRichPostHtml(
           font-weight: 600;
           cursor: pointer;
         }
+        /* Native Chromium compositor sticky lock at viewport top (0px) with zero JS scroll animation/jitter */
+        [data-gp-sticky-nav="1"] {
+          position: -webkit-sticky !important;
+          position: sticky !important;
+          top: 0px !important;
+          bottom: auto !important;
+          left: auto !important;
+          right: auto !important;
+          z-index: 9999 !important;
+          box-shadow: 0 3px 12px rgba(15, 23, 42, 0.10) !important;
+        }
+        [data-gp-sticky-nav="1"][data-gp-sticky-auto-bg="1"] {
+          background-color: var(--gp-bg) !important;
+        }
       </style>
     </head>
     <body>
+      $headerHtml
       <div id="gp-post-root">$rawHtml</div>
       <script>
         (function() {
           // Wrap wide tables for smooth horizontal scrolling
-          document.querySelectorAll('table').forEach(function(t) {
+          document.querySelectorAll('#gp-post-root table').forEach(function(t) {
             if (!t.parentElement || !t.parentElement.classList.contains('gp-table-wrap')) {
               var w = document.createElement('div');
               w.className = 'gp-table-wrap';
@@ -713,11 +1019,317 @@ private fun buildRichPostHtml(
               w.appendChild(t);
             }
           });
-          function notifyHeight() {
-            if (window.GyanBridge && document.documentElement) {
-              window.GyanBridge.onHeightChanged(document.documentElement.scrollHeight);
+
+          // --- Native CSS Sticky MCQ Timer Navigation Discovery (Zero JS Scroll Transform) ---
+          var stickyBars = [];
+          var stickyRefreshTimer = null;
+
+          var STICKY_CLASS_REGEX = /(timer[-_]?(bar|nav|header|box|panel|wrap|strip|container|row)|quiz[-_]?(nav|header|bar|top|hud|sticky|controls|status|panel|strip|meta)|mcq[-_]?(nav|header|bar|top|hud|sticky|controls|status|panel)|test[-_]?(nav|header|bar|top|hud|controls)|sticky[-_]?(nav|header|bar|top|timer)|top[-_]?bar|nav[-_]?bar|hud[-_]?bar|score[-_]?bar|exam[-_]?(bar|nav|header))/i;
+          var TIMER_NODE_REGEX = /(timer|countdown|clock|time[-_]?left|time[-_]?display|stopwatch)/i;
+          var TIMER_TEXT_REGEX = /\b\d{1,2}\s*:\s*\d{2}\b|⏱|⏰|⏳/;
+          var QUESTION_CONTAINER_SELECTOR = '.mcq-q, .question, .q-card, .quiz-item, .question-card, input[type="radio"]';
+
+          function isTransparentBg(bg) {
+            if (!bg || bg === 'transparent') return true;
+            var m = bg.match(/rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*([\d.]+)\s*\)/i);
+            return !!(m && parseFloat(m[1]) < 0.12);
+          }
+
+          function hasMultipleQuestions(el) {
+            return el.querySelectorAll && el.querySelectorAll(QUESTION_CONTAINER_SELECTOR).length > 1;
+          }
+
+          function isQuestionElement(el) {
+            var cls = (el.className && typeof el.className === 'string') ? el.className : '';
+            return /\b(mcq-q|mcq-a|question-card|q-card|quiz-item|option|opt|choice)\b/i.test(cls);
+          }
+
+          function isVisibleElement(el) {
+            if (!el || el.nodeType !== 1) return false;
+            var cs = window.getComputedStyle(el);
+            if (!cs || cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) return false;
+            var rect = el.getBoundingClientRect();
+            return rect.width >= 80 && rect.height >= 24;
+          }
+
+          function promoteToBarContainer(startEl, root, rootWidth) {
+            var best = startEl;
+            var cur = startEl;
+            for (var depth = 0; depth < 8 && cur && cur !== root && cur !== document.body; depth++) {
+              var parent = cur.parentElement;
+              if (!parent || parent === root || parent === document.body) break;
+              var pTag = parent.tagName;
+              if (pTag === 'TABLE' || pTag === 'TBODY' || pTag === 'TR' || pTag === 'UL' || pTag === 'OL') break;
+              if (isQuestionElement(parent) || hasMultipleQuestions(parent)) break;
+              if (parent.querySelector && parent.querySelector(QUESTION_CONTAINER_SELECTOR)) break;
+              var pRect = parent.getBoundingClientRect();
+              if (pRect.height >= 26 && pRect.height <= 220 && pRect.width >= 100) {
+                best = parent;
+              } else {
+                break;
+              }
+              cur = parent;
+            }
+            return best;
+          }
+
+          function ensureAncestorsDoNotClip(el) {
+            var cur = el.parentElement;
+            while (cur && cur !== document.documentElement) {
+              var cls = (cur.className && typeof cur.className === 'string') ? cur.className : '';
+              if (!/\bgp-table-wrap\b/.test(cls)) {
+                var cs = window.getComputedStyle(cur);
+                if (cs) {
+                  if (cs.overflowY === 'hidden' || cs.overflowY === 'clip' || cs.overflowY === 'auto' || cs.overflowY === 'scroll') {
+                    cur.style.setProperty('overflow-y', 'visible', 'important');
+                  }
+                  if (cs.overflowX === 'hidden' || cs.overflowX === 'auto' || cs.overflowX === 'scroll') {
+                    cur.style.setProperty('overflow-x', 'clip', 'important');
+                  }
+                }
+              }
+              cur = cur.parentElement;
             }
           }
+
+          function clearOldStickyBindings() {
+            stickyBars.forEach(function(el) {
+              if (!el) return;
+              el.removeAttribute('data-gp-sticky-nav');
+              el.removeAttribute('data-gp-sticky-auto-bg');
+            });
+            stickyBars = [];
+          }
+
+          function discoverStickyBars() {
+            var root = document.getElementById('gp-post-root');
+            if (!root) return;
+
+            var rootRect = root.getBoundingClientRect();
+            var rootWidth = Math.max(rootRect.width || window.innerWidth || 320, 240);
+            var candidates = [];
+
+            function addCandidate(el) {
+              if (!el || el === root || el === document.body) return;
+              var promoted = promoteToBarContainer(el, root, rootWidth);
+              if (!promoted || promoted === root || promoted === document.body) return;
+              if (candidates.indexOf(promoted) !== -1) return;
+              if (!isVisibleElement(promoted)) return;
+              if (isQuestionElement(promoted) || hasMultipleQuestions(promoted)) return;
+              var r = promoted.getBoundingClientRect();
+              if (r.height < 24 || r.height > 220 || r.width < 100) return;
+              candidates.push(promoted);
+            }
+
+            var allElements = root.querySelectorAll('div, nav, header, section, aside, span, p');
+            for (var i = 0; i < allElements.length; i++) {
+              var el = allElements[i];
+              var cs = window.getComputedStyle(el);
+              if (!cs || cs.display === 'none' || cs.visibility === 'hidden') continue;
+
+              // 1. Explicitly sticky or top-fixed elements in post CSS
+              var pos = cs.position;
+              if (pos === 'sticky' || pos === '-webkit-sticky') {
+                addCandidate(el);
+                continue;
+              }
+              if (pos === 'fixed') {
+                var rFixed = el.getBoundingClientRect();
+                var isBottomDocked = cs.top === 'auto' && cs.bottom !== 'auto' && parseFloat(cs.bottom) <= 80;
+                if (!isBottomDocked && rFixed.height <= 210 && rFixed.height >= 24) {
+                  addCandidate(el);
+                }
+                continue;
+              }
+
+              // 2. Named timer / quiz navigation bars
+              var clsStr = (el.className && typeof el.className === 'string') ? el.className : '';
+              var clsId = clsStr + ' ' + (el.id || '');
+              if (STICKY_CLASS_REGEX.test(clsId)) {
+                var rNamed = el.getBoundingClientRect();
+                if (rNamed.width >= rootWidth * 0.45 && rNamed.height >= 26 && rNamed.height <= 210 &&
+                    !el.querySelector(QUESTION_CONTAINER_SELECTOR)) {
+                  addCandidate(el);
+                  continue;
+                }
+              }
+
+              // 3. Live timer elements -> promote to their navigation bar container
+              var isTimerByAttr = TIMER_NODE_REGEX.test(clsId);
+              var ownText = (el.textContent || '').trim();
+              var isTimerByText = ownText.length > 0 && ownText.length <= 40 &&
+                el.children.length <= 2 && TIMER_TEXT_REGEX.test(ownText);
+              if (isTimerByAttr || isTimerByText) {
+                addCandidate(el);
+              }
+            }
+
+            // Deduplicate: drop any candidate contained inside another candidate
+            var deduped = candidates.filter(function(cand) {
+              for (var j = 0; j < candidates.length; j++) {
+                var other = candidates[j];
+                if (other !== cand && other.contains(cand)) {
+                  return false;
+                }
+              }
+              return true;
+            });
+
+            var sameSet = deduped.length === stickyBars.length &&
+              deduped.every(function(el, idx) { return stickyBars[idx] === el; });
+
+            if (!sameSet) {
+              clearOldStickyBindings();
+              deduped.forEach(function(el) {
+                var cs = window.getComputedStyle(el);
+                if (isTransparentBg(cs.backgroundColor)) {
+                  el.setAttribute('data-gp-sticky-auto-bg', '1');
+                }
+                el.setAttribute('data-gp-sticky-nav', '1');
+                ensureAncestorsDoNotClip(el);
+                stickyBars.push(el);
+              });
+            } else {
+              stickyBars.forEach(ensureAncestorsDoNotClip);
+            }
+          }
+
+          function scheduleStickyRefresh() {
+            if (stickyRefreshTimer) clearTimeout(stickyRefreshTimer);
+            stickyRefreshTimer = setTimeout(function() {
+              stickyRefreshTimer = null;
+              discoverStickyBars();
+            }, 120);
+          }
+
+          // --- Live DOM Text-Node Translation Helpers (preserves interactive MCQs, timers & styling) ---
+          var SKIP_TRANSLATE_TAGS = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, CODE: 1, PRE: 1, SVG: 1, TEMPLATE: 1, IFRAME: 1 };
+          var PURE_NUMERIC_OR_CLOCK_REGEX = /^[\d\s:.,/%+\-–—()[\]⏱⏰⏳•|]+${'$'}/;
+
+          function collectTranslatableNodes() {
+            var root = document.getElementById('gp-post-root');
+            if (!root) return [];
+            if (window.__gpTranslatableNodes && window.__gpOriginalNodeTexts &&
+                window.__gpTranslatableNodes.length > 0 &&
+                window.__gpTranslatableNodes[0] && window.__gpTranslatableNodes[0].isConnected) {
+              return window.__gpTranslatableNodes;
+            }
+            var nodes = [];
+            var originals = [];
+            var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+            var current;
+            while ((current = walker.nextNode())) {
+              var parent = current.parentElement;
+              if (!parent) continue;
+              if (SKIP_TRANSLATE_TAGS[parent.tagName]) continue;
+              if (parent.closest && parent.closest('script, style, code, pre, svg, noscript')) continue;
+              var raw = current.nodeValue || '';
+              var trimmed = raw.trim();
+              if (trimmed.length < 2) continue;
+              if (PURE_NUMERIC_OR_CLOCK_REGEX.test(trimmed)) continue;
+              nodes.push(current);
+              originals.push(raw);
+            }
+            window.__gpTranslatableNodes = nodes;
+            window.__gpOriginalNodeTexts = originals;
+            return nodes;
+          }
+
+          window.gpExtractTranslatableSegments = function() {
+            collectTranslatableNodes();
+            var originals = window.__gpOriginalNodeTexts || [];
+            return JSON.stringify(originals.map(function(s) { return s.trim(); }));
+          };
+
+          window.gpApplyTranslatedSegments = function(translatedList) {
+            if (!Array.isArray(translatedList)) return;
+            var nodes = collectTranslatableNodes();
+            var originals = window.__gpOriginalNodeTexts || [];
+            var count = Math.min(nodes.length, translatedList.length);
+            for (var i = 0; i < count; i++) {
+              var orig = originals[i] || '';
+              var translated = translatedList[i];
+              if (typeof translated === 'string' && translated.trim().length > 0) {
+                var leadMatch = orig.match(/^\s*/);
+                var trailMatch = orig.match(/\s*${'$'}/);
+                var lead = leadMatch ? leadMatch[0] : '';
+                var trail = trailMatch ? trailMatch[0] : '';
+                nodes[i].nodeValue = lead + translated.trim() + trail;
+              }
+            }
+            setTimeout(discoverStickyBars, 60);
+          };
+
+          window.gpRestoreOriginalTexts = function() {
+            var nodes = window.__gpTranslatableNodes || [];
+            var originals = window.__gpOriginalNodeTexts || [];
+            for (var i = 0; i < Math.min(nodes.length, originals.length); i++) {
+              if (nodes[i] && nodes[i].isConnected) {
+                nodes[i].nodeValue = originals[i];
+              }
+            }
+            setTimeout(discoverStickyBars, 60);
+          };
+
+          window.gpSetArticleTitle = function(nextTitle) {
+            var titleEl = document.getElementById('gp-article-title');
+            if (titleEl && typeof nextTitle === 'string' && nextTitle.length > 0) {
+              titleEl.textContent = nextTitle;
+            }
+          };
+
+          function isInteractiveTapTarget(startEl) {
+            if (!startEl) return false;
+            var sel = window.getSelection ? window.getSelection().toString() : '';
+            if (sel && sel.trim().length > 0) return true;
+
+            var el = startEl.nodeType === 1 ? startEl : startEl.parentElement;
+            if (!el) return false;
+            if (el.closest && el.closest(
+              'a, button, input, select, textarea, label, option, summary, [role="button"], [role="link"], [role="option"], [role="radio"], [role="checkbox"], [role="tab"], [onclick], [data-gp-sticky-nav="1"], [data-correct], [data-is-correct], [data-option], [data-choice], [data-index]'
+            )) {
+              return true;
+            }
+            var cur = el;
+            for (var d = 0; d < 4 && cur && cur !== document.body && cur.id !== 'gp-post-root' && cur.id !== 'gp-native-header'; d++) {
+              var cls = (cur.className && typeof cur.className === 'string') ? cur.className : '';
+              if (/\b(opt|option|options|choice|choices|btn|button|badge|pill|tab|pager|palette|q-num|qnum|nav-item|submit|reset|next|prev|toggle|expand|collapse|show-answer|quiz-btn|mcq-btn)\b/i.test(cls)) {
+                return true;
+              }
+              var cs = window.getComputedStyle(cur);
+              var rect = cur.getBoundingClientRect ? cur.getBoundingClientRect() : null;
+              if (cs && cs.cursor === 'pointer' && rect && rect.height <= 220) {
+                return true;
+              }
+              cur = cur.parentElement;
+            }
+            return false;
+          }
+
+          // Handle in-page #anchor jumps natively inside WebView and toggle top navigation on single non-interactive tap
+          document.addEventListener('click', function(ev) {
+            var anchor = ev.target && ev.target.closest ? ev.target.closest('a[href^="#"]') : null;
+            if (anchor) {
+              var hash = anchor.getAttribute('href') || '';
+              if (hash.length > 1) {
+                var target = document.getElementById(hash.slice(1));
+                if (target) {
+                  ev.preventDefault();
+                  var stickyOffset = stickyBars.length > 0 ? (stickyBars[0].getBoundingClientRect().height + 10) : 8;
+                  var targetTop = Math.max(0, target.getBoundingClientRect().top + window.scrollY - stickyOffset);
+                  window.scrollTo({ top: targetTop, behavior: 'smooth' });
+                  return;
+                }
+              }
+            }
+            if (ev.defaultPrevented || isInteractiveTapTarget(ev.target)) return;
+            if (window.GyanBridge && window.GyanBridge.onToggleTopNav) {
+              window.GyanBridge.onToggleTopNav();
+            }
+          });
+
+          window.gpDiscoverStickyBars = discoverStickyBars;
+
           window.gpApplyTheme = function(fontPx, bg, text, card, border, darkMode, paperMode) {
             var root = document.documentElement.style;
             root.setProperty('--gp-font-size', fontPx + 'px');
@@ -730,19 +1342,42 @@ private fun buildRichPostHtml(
             } else {
               document.documentElement.classList.remove('gp-eye-comfort');
             }
-            document.querySelectorAll('a').forEach(function(a) {
+            document.querySelectorAll('#gp-post-root a').forEach(function(a) {
               a.style.color = darkMode ? '#60A5FA' : '#0F345B';
             });
-            setTimeout(notifyHeight, 60);
+            document.querySelectorAll('#gp-native-header .gp-pill-class').forEach(function(el) {
+              el.style.background = darkMode ? 'rgba(15, 52, 91, 0.45)' : 'rgba(15, 52, 91, 0.10)';
+              el.style.color = darkMode ? '#93C5FD' : '#0F345B';
+            });
+            document.querySelectorAll('#gp-native-header .gp-pill-subject').forEach(function(el) {
+              el.style.color = darkMode ? '#C4B5FD' : '#6D28D9';
+            });
+            setTimeout(discoverStickyBars, 60);
           };
-          if (window.ResizeObserver) {
-            new ResizeObserver(notifyHeight).observe(document.body);
-          }
+
           if (window.MutationObserver) {
-            new MutationObserver(notifyHeight).observe(document.body, { childList: true, subtree: true, attributes: true });
+            var postRoot = document.getElementById('gp-post-root') || document.body;
+            new MutationObserver(function(mutations) {
+              for (var m = 0; m < mutations.length; m++) {
+                var mut = mutations[m];
+                if (mut.type === 'attributes' &&
+                    (mut.attributeName === 'data-gp-sticky-nav' ||
+                     mut.attributeName === 'data-gp-sticky-auto-bg')) {
+                  continue;
+                }
+                var targetEl = mut.target && mut.target.nodeType === 1 ? mut.target : (mut.target ? mut.target.parentElement : null);
+                var insideTrackedSticky = !!(targetEl && targetEl.closest && targetEl.closest('[data-gp-sticky-nav="1"]'));
+                if (!insideTrackedSticky) {
+                  scheduleStickyRefresh();
+                  break;
+                }
+              }
+            }).observe(postRoot, { childList: true, subtree: true, attributes: true });
           }
-          window.addEventListener('load', notifyHeight);
-          setTimeout(notifyHeight, 120);
+
+          window.addEventListener('load', discoverStickyBars);
+          setTimeout(discoverStickyBars, 120);
+          setTimeout(discoverStickyBars, 600);
         })();
       </script>
     </body>
@@ -953,10 +1588,13 @@ private fun RenderCleanBlock(
 private fun ReaderFloatingToolbar(
   isSaved: Boolean,
   isPaperMode: Boolean,
+  isTranslating: Boolean,
+  isTranslated: Boolean,
   isPreparingPrint: Boolean,
   onBackClick: () -> Unit,
   onFontDecrease: () -> Unit,
   onFontIncrease: () -> Unit,
+  onTranslateClick: () -> Unit,
   onTogglePaperMode: () -> Unit,
   onToggleBookmark: () -> Unit,
   onPrintClick: () -> Unit,
@@ -968,7 +1606,7 @@ private fun ReaderFloatingToolbar(
     color = extended.readerSurface,
     border = BorderStroke(1.dp, extended.readerBorder),
     tonalElevation = 2.dp,
-    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+    modifier = Modifier.fillMaxWidth(),
   ) {
     Row(
       modifier =
@@ -1021,6 +1659,34 @@ private fun ReaderFloatingToolbar(
 
       Row(verticalAlignment = Alignment.CenterVertically) {
         IconButton(
+          onClick = onTranslateClick,
+          enabled = !isTranslating,
+          modifier =
+            Modifier.minimumInteractiveComponentSize()
+              .clip(CircleShape)
+              .background(
+                if (isTranslated) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                else Color.Transparent
+              )
+              .testTag("reader_translate_button"),
+        ) {
+          if (isTranslating) {
+            CircularProgressIndicator(
+              modifier = Modifier.size(18.dp),
+              strokeWidth = 2.dp,
+              color = MaterialTheme.colorScheme.primary,
+            )
+          } else {
+            Icon(
+              imageVector = Icons.Rounded.Translate,
+              contentDescription = stringResource(R.string.cd_translate),
+              tint =
+                if (isTranslated) MaterialTheme.colorScheme.primary
+                else extended.readerTextSecondary,
+            )
+          }
+        }
+        IconButton(
           onClick = onTogglePaperMode,
           modifier =
             Modifier.minimumInteractiveComponentSize()
@@ -1056,19 +1722,11 @@ private fun ReaderFloatingToolbar(
               color = MaterialTheme.colorScheme.primary,
             )
           } else {
-            Box(contentAlignment = Alignment.Center) {
-              Icon(
-                imageVector = Icons.Rounded.Print,
-                contentDescription = stringResource(R.string.cd_print),
-                tint = extended.readerTextPrimary,
-              )
-              Icon(
-                imageVector = Icons.Rounded.AutoAwesome,
-                contentDescription = null,
-                tint = AccentGold,
-                modifier = Modifier.size(11.dp).align(Alignment.TopEnd),
-              )
-            }
+            Icon(
+              imageVector = Icons.Rounded.Print,
+              contentDescription = stringResource(R.string.cd_print),
+              tint = extended.readerTextPrimary,
+            )
           }
         }
         IconButton(
@@ -1087,15 +1745,15 @@ private fun ReaderFloatingToolbar(
 }
 
 @Composable
-private fun AiPrintStatusBanner(
-  uiState: AiPrintUiState,
-  onRetryAi: () -> Unit,
-  onStandardPrint: () -> Unit,
+private fun TranslateStatusBanner(
+  uiState: TranslateUiState,
+  onRestoreOriginal: () -> Unit,
+  onRetry: (TranslationLanguage) -> Unit,
   onDismiss: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
   val extended = LocalGyanExtendedColors.current
-  val isError = uiState is AiPrintUiState.Error
+  val isError = uiState is TranslateUiState.Error
   Surface(
     shape = RoundedCornerShape(14.dp),
     color = if (isError) MaterialTheme.colorScheme.errorContainer else extended.readerSurface,
@@ -1104,74 +1762,61 @@ private fun AiPrintStatusBanner(
         1.dp,
         if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.4f) else extended.readerBorder,
       ),
-    modifier = modifier.fillMaxWidth().testTag("ai_print_layout_banner"),
+    modifier = modifier.fillMaxWidth().testTag("translate_status_banner"),
   ) {
     Row(
       modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-      verticalAlignment = Alignment.Top,
+      verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
       when (uiState) {
-        AiPrintUiState.Idle -> Unit
-        AiPrintUiState.Loading -> {
+        TranslateUiState.Idle -> Unit
+        is TranslateUiState.Loading -> {
           CircularProgressIndicator(
-            modifier = Modifier.size(18.dp).padding(top = 2.dp),
+            modifier = Modifier.size(18.dp),
             strokeWidth = 2.dp,
             color = MaterialTheme.colorScheme.primary,
           )
           Text(
-            text = stringResource(R.string.ai_print_optimizing),
+            text =
+              stringResource(
+                R.string.translate_loading,
+                "${uiState.targetLanguage.displayName} (${uiState.targetLanguage.nativeName})",
+              ),
             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
             color = extended.readerTextPrimary,
             modifier = Modifier.weight(1f),
           )
         }
-        is AiPrintUiState.Success -> {
-          val plan = uiState.plan
+        is TranslateUiState.Success -> {
+          val lang = uiState.result.targetLanguage
           Icon(
-            imageVector = Icons.Rounded.AutoAwesome,
+            imageVector = Icons.Rounded.Translate,
             contentDescription = null,
-            tint = AccentGold,
+            tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(18.dp),
           )
-          Column(
+          Text(
+            text =
+              stringResource(
+                R.string.translate_active_label,
+                "${lang.displayName} (${lang.nativeName})",
+              ),
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+            color = extended.readerTextPrimary,
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(3.dp),
+          )
+          TextButton(
+            onClick = onRestoreOriginal,
+            modifier = Modifier.minimumInteractiveComponentSize().testTag("translate_restore_button"),
           ) {
             Text(
-              text = stringResource(R.string.ai_print_badge_label),
-              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-              color = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-              text = plan.summaryMessage,
-              style = MaterialTheme.typography.bodySmall,
-              color = extended.readerTextPrimary,
-            )
-            if (plan.topicTitles.isNotEmpty()) {
-              val preview = plan.topicTitles.take(4).joinToString(" • ")
-              val moreSuffix = if (plan.topicTitles.size > 4) " +${plan.topicTitles.size - 4} more" else ""
-              Text(
-                text = "Topics grouped: $preview$moreSuffix",
-                style = MaterialTheme.typography.labelSmall,
-                color = extended.readerTextSecondary,
-                modifier = Modifier.testTag("ai_print_topics_preview"),
-              )
-            }
-          }
-          IconButton(
-            onClick = onDismiss,
-            modifier = Modifier.minimumInteractiveComponentSize().testTag("dismiss_ai_print_banner"),
-          ) {
-            Icon(
-              imageVector = Icons.Rounded.Close,
-              contentDescription = stringResource(R.string.cd_dismiss_notice),
-              tint = extended.readerTextSecondary,
-              modifier = Modifier.size(18.dp),
+              text = stringResource(R.string.translate_original),
+              style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
             )
           }
         }
-        is AiPrintUiState.Error -> {
+        is TranslateUiState.Error -> {
           Icon(
             imageVector = Icons.Rounded.ErrorOutline,
             contentDescription = null,
@@ -1183,7 +1828,7 @@ private fun AiPrintStatusBanner(
             verticalArrangement = Arrangement.spacedBy(6.dp),
           ) {
             Text(
-              text = stringResource(R.string.ai_print_error_title),
+              text = stringResource(R.string.translate_error_title),
               style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
               color = MaterialTheme.colorScheme.onErrorContainer,
             )
@@ -1191,32 +1836,21 @@ private fun AiPrintStatusBanner(
               text = uiState.message,
               style = MaterialTheme.typography.bodySmall,
               color = MaterialTheme.colorScheme.onErrorContainer,
-              modifier = Modifier.testTag("ai_print_error_message"),
+              modifier = Modifier.testTag("translate_error_message"),
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-              OutlinedButton(
-                onClick = onRetryAi,
-                modifier = Modifier.minimumInteractiveComponentSize().testTag("ai_print_retry_button"),
-              ) {
-                Text(
-                  text = stringResource(R.string.ai_print_retry),
-                  style = MaterialTheme.typography.labelMedium,
-                )
-              }
-              TextButton(
-                onClick = onStandardPrint,
-                modifier = Modifier.minimumInteractiveComponentSize().testTag("ai_print_standard_button"),
-              ) {
-                Text(
-                  text = stringResource(R.string.ai_print_standard),
-                  style = MaterialTheme.typography.labelMedium,
-                )
-              }
+            OutlinedButton(
+              onClick = { onRetry(uiState.targetLanguage) },
+              modifier = Modifier.minimumInteractiveComponentSize().testTag("translate_retry_button"),
+            ) {
+              Text(
+                text = stringResource(R.string.translate_retry),
+                style = MaterialTheme.typography.labelMedium,
+              )
             }
           }
           IconButton(
             onClick = onDismiss,
-            modifier = Modifier.minimumInteractiveComponentSize().testTag("dismiss_ai_print_banner"),
+            modifier = Modifier.minimumInteractiveComponentSize().testTag("dismiss_translate_banner"),
           ) {
             Icon(
               imageVector = Icons.Rounded.Close,
@@ -1227,6 +1861,187 @@ private fun AiPrintStatusBanner(
           }
         }
       }
+    }
+  }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TranslateLanguageBottomSheet(
+  selectedLanguage: TranslationLanguage?,
+  onSelectOriginal: () -> Unit,
+  onSelectLanguage: (TranslationLanguage) -> Unit,
+  onDismiss: () -> Unit,
+) {
+  val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+  ModalBottomSheet(
+    onDismissRequest = onDismiss,
+    sheetState = sheetState,
+  ) {
+    Column(
+      modifier =
+        Modifier.fillMaxWidth()
+          .verticalScroll(rememberScrollState())
+          .padding(horizontal = 20.dp)
+          .padding(bottom = 28.dp),
+      verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        Icon(
+          imageVector = Icons.Rounded.Translate,
+          contentDescription = null,
+          tint = MaterialTheme.colorScheme.primary,
+        )
+        Column {
+          Text(
+            text = stringResource(R.string.translate_sheet_title),
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+          )
+          Text(
+            text = stringResource(R.string.translate_sheet_subtitle),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
+      }
+
+      if (selectedLanguage != null) {
+        Surface(
+          onClick = onSelectOriginal,
+          shape = RoundedCornerShape(12.dp),
+          color = MaterialTheme.colorScheme.secondaryContainer,
+          modifier =
+            Modifier.fillMaxWidth()
+              .minimumInteractiveComponentSize()
+              .testTag("translate_option_original"),
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+          ) {
+            Icon(
+              imageVector = Icons.Rounded.Refresh,
+              contentDescription = null,
+              tint = MaterialTheme.colorScheme.onSecondaryContainer,
+              modifier = Modifier.size(18.dp),
+            )
+            Text(
+              text = stringResource(R.string.translate_restore_original),
+              style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+              color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+          }
+        }
+      }
+
+      HorizontalDivider()
+
+      TranslationLanguages.supported.forEach { lang ->
+        val isSelected = selectedLanguage?.code == lang.code
+        Surface(
+          onClick = { onSelectLanguage(lang) },
+          shape = RoundedCornerShape(12.dp),
+          color =
+            if (isSelected) MaterialTheme.colorScheme.primaryContainer
+            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+          modifier =
+            Modifier.fillMaxWidth()
+              .minimumInteractiveComponentSize()
+              .testTag("translate_option_${lang.code}"),
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+          ) {
+            Column {
+              Text(
+                text = lang.displayName,
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                color =
+                  if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                  else MaterialTheme.colorScheme.onSurface,
+              )
+              Text(
+                text = lang.nativeName,
+                style = MaterialTheme.typography.bodySmall,
+                color =
+                  if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                  else MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
+            if (isSelected) {
+              Icon(
+                imageVector = Icons.Rounded.Check,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+private fun parseJsStringArray(rawJsResult: String?): List<String> {
+  if (rawJsResult.isNullOrBlank() || rawJsResult == "null") return emptyList()
+  val unwrapped =
+    runCatching {
+      val trimmed = rawJsResult.trim()
+      if (trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+        org.json.JSONTokener(trimmed).nextValue() as? String ?: trimmed
+      } else {
+        trimmed
+      }
+    }.getOrDefault(rawJsResult)
+  return runCatching {
+    val arr = JSONArray(unwrapped)
+    List(arr.length()) { idx -> arr.optString(idx, "") }
+  }.getOrDefault(emptyList())
+}
+
+private fun extractCleanBlockSegments(blocks: List<ArticleBlock>): List<String> =
+  buildList {
+    blocks.forEach { block ->
+      when (block) {
+        is ArticleBlock.HeroBannerBlock -> Unit
+        is ArticleBlock.SectionHeaderBlock -> add(block.heading)
+        is ArticleBlock.HeadingBlock -> add(block.text)
+        is ArticleBlock.ParagraphBlock -> add(block.text)
+        is ArticleBlock.BulletListBlock -> block.items.forEach { add(it) }
+        is ArticleBlock.McqQuestionBlock -> add(block.text)
+        is ArticleBlock.McqAnswerBlock -> add(block.text)
+        is ArticleBlock.ImageBlock -> Unit
+        is ArticleBlock.TableBlock -> block.rows.forEach { row -> row.forEach { add(it) } }
+      }
+    }
+  }
+
+private fun applyCleanBlockTranslations(
+  blocks: List<ArticleBlock>,
+  translated: List<String>,
+): List<ArticleBlock> {
+  var cursor = 0
+  fun next(fallback: String): String =
+    translated.getOrNull(cursor++)?.takeIf { it.isNotBlank() } ?: fallback
+
+  return blocks.map { block ->
+    when (block) {
+      is ArticleBlock.HeroBannerBlock -> block
+      is ArticleBlock.SectionHeaderBlock -> block.copy(heading = next(block.heading))
+      is ArticleBlock.HeadingBlock -> block.copy(text = next(block.text))
+      is ArticleBlock.ParagraphBlock -> block.copy(text = next(block.text))
+      is ArticleBlock.BulletListBlock -> block.copy(items = block.items.map { next(it) })
+      is ArticleBlock.McqQuestionBlock -> block.copy(text = next(block.text))
+      is ArticleBlock.McqAnswerBlock -> block.copy(text = next(block.text))
+      is ArticleBlock.ImageBlock -> block
+      is ArticleBlock.TableBlock ->
+        block.copy(rows = block.rows.map { row -> row.map { next(it) } })
     }
   }
 }
@@ -1464,7 +2279,25 @@ private fun capturePrintableSnapshot(
   liveWebView: WebView? = null,
   onCaptured: (PrintableSnapshot) -> Unit,
 ) {
+  val mainHandler = Handler(Looper.getMainLooper())
+  var completed = false
+
+  fun deliver(snapshot: PrintableSnapshot) {
+    if (completed) return
+    completed = true
+    onCaptured(snapshot)
+  }
+
+  val fallbackSnapshot =
+    PrintableSnapshot(
+      rawHtml = post.htmlContent,
+      extraHeadStyles = "",
+      preserveAttemptedSnapshot = false,
+    )
+
   if (liveWebView != null) {
+    // Safety fallback if the live WebView is detached or stalled while evaluating JS
+    mainHandler.postDelayed({ deliver(fallbackSnapshot) }, 1500L)
     try {
       liveWebView.evaluateJavascript(CAPTURE_LIVE_DOM_JS) { rawJson ->
         val parsed =
@@ -1473,15 +2306,9 @@ private fun capturePrintableSnapshot(
           }.getOrNull()
         val useFallback = parsed == null || parsed.optBoolean("fallback", true)
         if (useFallback) {
-          onCaptured(
-            PrintableSnapshot(
-              rawHtml = post.htmlContent,
-              extraHeadStyles = "",
-              preserveAttemptedSnapshot = false,
-            )
-          )
+          deliver(fallbackSnapshot)
         } else {
-          onCaptured(
+          deliver(
             PrintableSnapshot(
               rawHtml = parsed.optString("bodyHtml", post.htmlContent).ifBlank { post.htmlContent },
               extraHeadStyles = parsed.optString("headStyles", ""),
@@ -1496,13 +2323,7 @@ private fun capturePrintableSnapshot(
     }
   }
 
-  onCaptured(
-    PrintableSnapshot(
-      rawHtml = post.htmlContent,
-      extraHeadStyles = "",
-      preserveAttemptedSnapshot = false,
-    )
-  )
+  deliver(fallbackSnapshot)
 }
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -1512,7 +2333,6 @@ private fun launchPrintWebView(
   rawHtml: String,
   extraHeadStyles: String,
   preserveAttemptedSnapshot: Boolean,
-  layoutPlan: PrintTopicLayoutPlan? = null,
   onPrintDispatched: () -> Unit = {},
 ) {
   val activity = context.findActivity() ?: context
@@ -1549,22 +2369,34 @@ private fun launchPrintWebView(
       override fun onPageFinished(view: WebView?, url: String?) {
         super.onPageFinished(view, url)
         view?.evaluateJavascript(
-          "window.gpPrepareMcqsForPrint && window.gpPrepareMcqsForPrint(); window.gpGroupTopicsForPrint && window.gpGroupTopicsForPrint();"
+          "window.gpPrepareMcqsForPrint && window.gpPrepareMcqsForPrint();"
         ) {
-          mainHandler.postDelayed({ triggerSystemPrint() }, 420L)
+          mainHandler.postDelayed({ triggerSystemPrint() }, 400L)
         }
         mainHandler.postDelayed({ triggerSystemPrint() }, 1300L)
       }
     }
+
+  // Outer safety guard in case an external image or script delays onPageFinished
+  mainHandler.postDelayed(
+    {
+      if (!printTriggered) {
+        printWebView.evaluateJavascript(
+          "window.gpPrepareMcqsForPrint && window.gpPrepareMcqsForPrint();"
+        ) {
+          triggerSystemPrint()
+        }
+        mainHandler.postDelayed({ triggerSystemPrint() }, 350L)
+      }
+    },
+    4000L,
+  )
 
   val htmlDoc =
     buildPrintablePostHtml(
       rawHtml = rawHtml,
       extraHeadStyles = extraHeadStyles,
       preserveAttemptedSnapshot = preserveAttemptedSnapshot,
-      applyTopicGrouping = layoutPlan?.keepSectionsTogether ?: true,
-      maxUnbrokenTopicHeightPx = layoutPlan?.maxUnbrokenBlockHeightPx ?: 860,
-      aiTopicTitles = layoutPlan?.topicTitles ?: emptyList(),
     )
   printWebView.loadDataWithBaseURL(
     BundledContent.BLOG_BASE_URL,
@@ -1581,9 +2413,6 @@ internal fun buildPrintablePostHtml(
   rawHtml: String,
   extraHeadStyles: String = "",
   preserveAttemptedSnapshot: Boolean = false,
-  applyTopicGrouping: Boolean = true,
-  maxUnbrokenTopicHeightPx: Int = 860,
-  aiTopicTitles: List<String> = emptyList(),
 ): String {
   val frozenTemplateHtml =
     if (preserveAttemptedSnapshot) {
@@ -1592,11 +2421,6 @@ internal fun buildPrintablePostHtml(
     } else {
       ""
     }
-  val maxTopicPx = maxUnbrokenTopicHeightPx.coerceIn(480, 1100)
-  val aiTopicsJson =
-    org.json.JSONArray(aiTopicTitles.map { it.trim() }.filter { it.length >= 2 })
-      .toString()
-      .replace("</", "<\\/")
   return """
     <!DOCTYPE html>
     <html>
@@ -1772,10 +2596,21 @@ internal fun buildPrintablePostHtml(
           [data-gp-print-state="correct"], [data-gp-print-state="wrong"] {
             break-inside: avoid !important;
             page-break-inside: avoid !important;
+            -webkit-column-break-inside: avoid !important;
+            overflow: visible !important;
+          }
+          .gp-topic-group, .gp-section, section, article {
+            overflow: visible !important;
           }
           h1, h2, h3, h4, h5, h6, [data-gp-topic-heading="1"] {
             break-after: avoid !important;
             page-break-after: avoid !important;
+          }
+          [data-gp-sticky-nav="1"] {
+            position: static !important;
+            translate: none !important;
+            transform: none !important;
+            box-shadow: none !important;
           }
           p, li {
             orphans: 3;
@@ -1987,185 +2822,10 @@ internal fun buildPrintablePostHtml(
             });
           }
 
-          var aiRawTopicTitles = $aiTopicsJson;
-          function normalizeTopicText(str) {
-            return (str || '').toLowerCase().replace(/[^a-z0-9\u0900-\u097f]+/g, ' ').trim();
-          }
-          var aiNormalizedTopics = aiRawTopicTitles
-            .map(normalizeTopicText)
-            .filter(function(t) { return t.length >= 3; });
-
-          function matchesAiTopicHeading(node) {
-            if (!aiNormalizedTopics.length || !node || node.nodeType !== 1) return false;
-            var txt = (node.textContent || '').trim();
-            if (txt.length < 3 || txt.length > 160) return false;
-            if (node.querySelectorAll && node.querySelectorAll('p, table, ul, ol, section, article').length > 1) return false;
-            var norm = normalizeTopicText(txt);
-            if (!norm) return false;
-            for (var i = 0; i < aiNormalizedTopics.length; i++) {
-              var target = aiNormalizedTopics[i];
-              if (norm === target || (target.length >= 6 && norm.indexOf(target) !== -1 && norm.length <= target.length + 18)) {
-                return true;
-              }
-            }
-            return false;
-          }
-
-          function isTopicHeadingNode(node) {
-            if (!node || node.nodeType !== 1) return false;
-            var tag = node.tagName;
-            if (tag === 'H1' || tag === 'H2' || tag === 'H3' || tag === 'H4') return true;
-            var cls = (node.className || '').toString().toLowerCase();
-            if (/\b(topic-title|section-title|sub-heading|subheading|heading)\b/.test(cls)) return true;
-            if (matchesAiTopicHeading(node)) return true;
-            if (tag === 'P' || tag === 'DIV') {
-              var txt = (node.textContent || '').trim();
-              if (txt.length >= 3 && txt.length <= 110 && node.children.length === 1) {
-                var childTag = node.children[0].tagName;
-                if ((childTag === 'STRONG' || childTag === 'B') &&
-                    ((node.children[0].textContent || '').trim().length >= txt.length - 3)) {
-                  return true;
-                }
-              }
-            }
-            return false;
-          }
-
-          function findPrimaryContentContainer(root) {
-            var current = root;
-            for (var depth = 0; depth < 3; depth++) {
-              var elementChildren = [];
-              for (var i = 0; i < current.children.length; i++) {
-                var ch = current.children[i];
-                if (ch.tagName !== 'SCRIPT' && ch.tagName !== 'STYLE' && ch.tagName !== 'TEMPLATE') {
-                  elementChildren.push(ch);
-                }
-              }
-              if (elementChildren.length === 1 &&
-                  (elementChildren[0].tagName === 'DIV' || elementChildren[0].tagName === 'ARTICLE' || elementChildren[0].tagName === 'MAIN')) {
-                current = elementChildren[0];
-              } else {
-                break;
-              }
-            }
-            return current;
-          }
-
-          function groupFlatMcqTriplets(container) {
-            var children = Array.prototype.slice.call(container.children);
-            for (var i = 0; i < children.length; i++) {
-              var el = children[i];
-              if (!el || !el.classList || !el.classList.contains('mcq-q')) continue;
-              if (el.closest('[data-gp-qcard="1"]')) continue;
-              var wrapper = document.createElement('div');
-              wrapper.className = 'gp-topic-group';
-              wrapper.setAttribute('data-gp-qcard', '1');
-              wrapper.setAttribute('data-gp-keep-together', '1');
-              container.insertBefore(wrapper, el);
-              wrapper.appendChild(el);
-              var next = wrapper.nextElementSibling;
-              var steps = 0;
-              while (next && steps < 3) {
-                if (next.classList && next.classList.contains('mcq-q')) break;
-                if (isTopicHeadingNode(next)) break;
-                var after = next.nextElementSibling;
-                var isAnswer = next.classList && (next.classList.contains('mcq-a') || next.classList.contains('gp-print-answer'));
-                wrapper.appendChild(next);
-                steps++;
-                if (isAnswer) break;
-                next = after;
-              }
-            }
-          }
-
-          function groupSiblingsByTopicHeading(container) {
-            if (!container || container.dataset && container.dataset.gpGrouped === '1') return;
-            var children = Array.prototype.slice.call(container.children);
-            var headingCount = 0;
-            for (var i = 0; i < children.length; i++) {
-              if (isTopicHeadingNode(children[i])) headingCount++;
-            }
-            if (headingCount === 0) return;
-
-            var activeGroup = null;
-            for (var j = 0; j < children.length; j++) {
-              var node = children[j];
-              if (!node || node.tagName === 'SCRIPT' || node.tagName === 'STYLE' || node.tagName === 'TEMPLATE') {
-                continue;
-              }
-              if (node.classList && (node.classList.contains('gp-section') || node.classList.contains('gp-topic-group'))) {
-                activeGroup = null;
-                continue;
-              }
-              if (isTopicHeadingNode(node)) {
-                node.setAttribute('data-gp-topic-heading', '1');
-                activeGroup = document.createElement('div');
-                activeGroup.className = 'gp-topic-group';
-                activeGroup.setAttribute('data-gp-topic-group', '1');
-                container.insertBefore(activeGroup, node);
-                activeGroup.appendChild(node);
-              } else if (activeGroup) {
-                activeGroup.appendChild(node);
-              }
-            }
-            if (container.dataset) container.dataset.gpGrouped = '1';
-          }
-
-          function groupTopicsForPrint() {
-            var enabled = ${if (applyTopicGrouping) "true" else "false"};
-            if (!enabled) return;
-            var root = document.getElementById('gp-print-root') || document.body;
-            if (!root || (root.dataset && root.dataset.gpTopicsGrouped === '1')) return;
-
-            var maxUnbrokenPx = $maxTopicPx;
-            var mainContainer = findPrimaryContentContainer(root);
-
-            // 1. Keep flat MCQ question + options + answer triplets together
-            groupFlatMcqTriplets(mainContainer);
-            root.querySelectorAll('.gp-section, section, article').forEach(function(sec) {
-              groupFlatMcqTriplets(sec);
-            });
-
-            // 2. Group each topic heading with its following content siblings
-            groupSiblingsByTopicHeading(mainContainer);
-
-            // 3. Mark semantic topic containers so moderate-height topics never split mid-topic
-            var topicCandidates = root.querySelectorAll(
-              '[data-gp-topic-group="1"], .gp-section, section, article, .topic, .topic-card, .note-card, .card, .callout, .box, table, figure, details'
-            );
-            topicCandidates.forEach(function(block) {
-              if (block === mainContainer) return;
-              var rect = block.getBoundingClientRect();
-              var h = rect ? rect.height : 0;
-              if (h > 0 && h <= maxUnbrokenPx) {
-                block.setAttribute('data-gp-keep-together', '1');
-              } else if (h > maxUnbrokenPx) {
-                block.removeAttribute('data-gp-keep-together');
-                // For very long multi-page topics, keep heading + first content block paired so heading never orphans
-                var firstEl = block.firstElementChild;
-                if (firstEl && isTopicHeadingNode(firstEl) && firstEl.nextElementSibling &&
-                    !firstEl.parentElement.classList.contains('gp-topic-pair')) {
-                  var leadPair = document.createElement('div');
-                  leadPair.className = 'gp-topic-pair';
-                  leadPair.setAttribute('data-gp-keep-together', '1');
-                  var secondEl = firstEl.nextElementSibling;
-                  block.insertBefore(leadPair, firstEl);
-                  leadPair.appendChild(firstEl);
-                  leadPair.appendChild(secondEl);
-                }
-              }
-            });
-
-            if (root.dataset) root.dataset.gpTopicsGrouped = '1';
-          }
-
           window.gpPrepareMcqsForPrint = prepareMcqsForPrint;
-          window.gpGroupTopicsForPrint = groupTopicsForPrint;
           prepareMcqsForPrint();
-          groupTopicsForPrint();
           window.addEventListener('load', function() {
             prepareMcqsForPrint();
-            groupTopicsForPrint();
           });
         })();
       </script>

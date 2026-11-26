@@ -2,13 +2,13 @@ package com.example
 
 import com.example.data.BloggerFeedParser
 import com.example.data.BundledContent
-import com.example.data.PlaceholderAiRepository
 import com.example.data.StudyPost
+import com.example.data.TranslationLanguages
 import com.example.ui.MainUiState
 import com.example.ui.components.ArticleBlock
 import com.example.ui.components.ArticleHtmlParser
 import com.example.ui.screens.buildPrintablePostHtml
-import kotlinx.coroutines.test.runTest
+import com.example.ui.screens.buildRichPostHtml
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -260,27 +260,133 @@ class BloggerFeedParserTest {
   }
 
   @Test
-  fun `placeholder ai print layout detects topic headings and includes firebase notice`() = runTest {
-    val html =
+  fun `rich post html uses native sticky timer without scroll animation and supports one-tap toggle and translation`() {
+    val mcqHtml =
       """
-      <h2>1. Computer Maintenance</h2>
-      <p>Keep hardware clean and updated.</p>
-      <h2>2. Security &amp; Backups</h2>
-      <p>Use strong passwords and regular backups.</p>
+      <div class="quiz-top-bar" style="position: sticky; top: 0;">
+        <span id="timer">15:00</span>
+        <span class="score">Score: 0/10</span>
+      </div>
+      <div class="q-card"><p class="mcq-q">Q1. Sample question?</p></div>
       """.trimIndent()
-    val repo = PlaceholderAiRepository()
-    val plan = repo.planSmartPrintLayout("ICT Unit 3", html)
+    val samplePost = BundledContent.fallbackPosts.first()
+    val richHtml =
+      buildRichPostHtml(
+        rawHtml = mcqHtml,
+        fontSizeSp = 16,
+        bgHex = "#FFFFFF",
+        textHex = "#111827",
+        cardBgHex = "#F8FAFC",
+        borderHex = "#E2E8F0",
+        isDark = false,
+        isPaperMode = false,
+        post = samplePost,
+      )
 
-    assertTrue(plan.isPlaceholder)
-    assertTrue(plan.keepSectionsTogether)
-    assertTrue(plan.preventOrphanHeadings)
-    assertEquals(2, plan.groupedTopicCount)
-    assertEquals(listOf("1. Computer Maintenance", "2. Security & Backups"), plan.topicTitles)
-    assertTrue(plan.firebaseNotice?.contains("Firebase", ignoreCase = true) == true)
+    assertTrue(richHtml.contains("position: sticky !important;"))
+    assertTrue(richHtml.contains("top: 0px !important;"))
+    assertFalse(richHtml.contains("gpSyncStickyNav"))
+    assertTrue(richHtml.contains("gpDiscoverStickyBars"))
+    assertTrue(richHtml.contains("id=\"gp-native-header\""))
+    assertTrue(richHtml.contains("id=\"gp-post-root\""))
+    assertTrue(richHtml.contains("gpSetArticleTitle"))
+    assertTrue(richHtml.contains("onSwitchToCleanReader"))
+    assertTrue(richHtml.contains("onToggleTopNav"))
+    assertTrue(richHtml.contains("isInteractiveTapTarget"))
+    assertTrue(richHtml.contains("gpExtractTranslatableSegments"))
+    assertTrue(richHtml.contains("gpApplyTranslatedSegments"))
+    assertTrue(richHtml.contains("gpRestoreOriginalTexts"))
+    assertTrue(richHtml.contains("data-gp-sticky-nav"))
+    assertTrue(richHtml.contains("overflow-x: clip"))
+    assertTrue(richHtml.contains(":where(#gp-post-root button)"))
+    assertFalse(richHtml.contains("#gp-post-root button {"))
+    assertEquals(11, TranslationLanguages.supported.size)
+    assertTrue(TranslationLanguages.supported.any { it.code == "hi" })
+    assertTrue(TranslationLanguages.supported.any { it.code == "pa" })
+    assertTrue(TranslationLanguages.supported.any { it.code == "ml" })
 
-    val printable = buildPrintablePostHtml(rawHtml = html, applyTopicGrouping = plan.keepSectionsTogether)
-    assertTrue(printable.contains("gpGroupTopicsForPrint"))
-    assertTrue(printable.contains("data-gp-keep-together"))
-    assertTrue(printable.contains("orphans: 3"))
+    val printableHtml = buildPrintablePostHtml(rawHtml = mcqHtml)
+    assertTrue(printableHtml.contains("[data-gp-sticky-nav=\"1\"]"))
+    assertTrue(printableHtml.contains("translate: none !important"))
+    assertFalse(printableHtml.contains("gpGroupTopicsForPrint"))
+  }
+
+  @Test
+  fun `lastDayNotices filters only notices uploaded within last 24 hours`() {
+    val nowMs = 1_795_700_000_000L
+    val oneHourAgoMs = nowMs - (1L * 60L * 60L * 1000L)
+    val twelveHoursAgoMs = nowMs - (12L * 60L * 60L * 1000L)
+    val twoDaysAgoMs = nowMs - (48L * 60L * 60L * 1000L)
+
+    val template =
+      StudyPost(
+        id = "n",
+        title = "Notice",
+        classTag = "Notice",
+        subjectTag = "Notice",
+        categoryLabel = "GYAN PETIKA • Notice",
+        subLabel = "Notice",
+        materialCategory = "Chapter-wise Notes",
+        publishedDate = "Nov 25, 2026",
+        fullPublishedDate = "Wednesday, November 25, 2026",
+        estimatedReadTime = "3 min read",
+        snippet = "Notice snippet",
+        htmlContent = "<p>Notice</p>",
+        postUrl = "https://gyanpetika.blogspot.com/p/notice",
+        labels = listOf("Notice"),
+      )
+
+    val oldNotice = template.copy(id = "old", title = "Old Notice", publishedEpochMs = twoDaysAgoMs)
+    val recent12h = template.copy(id = "recent-12h", title = "12h Notice", publishedEpochMs = twelveHoursAgoMs)
+    val recent1h = template.copy(id = "recent-1h", title = "1h Notice", publishedEpochMs = oneHourAgoMs)
+
+    val state = MainUiState(posts = listOf(oldNotice, recent12h, recent1h))
+    assertEquals(3, state.noticePosts.size)
+    assertEquals(listOf("recent-1h", "recent-12h"), state.lastDayNotices(nowMs).map { it.id })
+  }
+
+  @Test
+  fun `computer science subject is available in all classes and detected by feed parser`() {
+    listOf("Class 9", "Class 10").forEach { className ->
+      val names = BundledContent.subjectsForClass(className).map { it.name }
+      val hindiIdx = names.indexOf("Hindi")
+      val sanskritIdx = names.indexOf("Sanskrit")
+      assertTrue("Hindi should exist in $className", hindiIdx >= 0)
+      assertEquals("Sanskrit should follow Hindi in $className", hindiIdx + 1, sanskritIdx)
+    }
+
+    listOf("Class 9", "Class 10", "Class 11", "Class 12").forEach { className ->
+      val subjects = BundledContent.subjectsForClass(className)
+      assertTrue(
+        "$className should include Computer Science",
+        subjects.any { it.id == "computer-science" && it.name == "Computer Science" },
+      )
+    }
+
+    val sampleJson =
+      """
+      {
+        "feed": {
+          "entry": [
+            {
+              "id": {"${'$'}t": "post-cs-11"},
+              "published": {"${'$'}t": "2026-11-25T10:15:00.000+05:30"},
+              "title": {"${'$'}t": "Class 11 Computer Science Python Loops"},
+              "content": {"${'$'}t": "<p>Python for and while loops.</p>"},
+              "category": [
+                {"term": "Class 11"},
+                {"term": "Computer Science"}
+              ]
+            }
+          ]
+        }
+      }
+      """
+        .trimIndent()
+
+    val post = BloggerFeedParser.parseFeedJson(sampleJson).first()
+    assertEquals("Class 11", post.classTag)
+    assertEquals("Computer Science", post.subjectTag)
+    assertTrue(post.publishedEpochMs > 0L)
   }
 }

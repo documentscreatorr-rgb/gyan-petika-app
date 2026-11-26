@@ -50,6 +50,7 @@ data class StudyPost(
   val commentCount: Int = 0,
   val banner: ArticleBanner? = null,
   val isBundled: Boolean = false,
+  val publishedEpochMs: Long = 0L,
 )
 
 data class ClassHubInfo(

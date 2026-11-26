@@ -1,239 +1,398 @@
 package com.example.data
 
-import androidx.core.text.HtmlCompat
-import com.google.firebase.Firebase
-import com.google.firebase.ai.ai
-import com.google.firebase.ai.type.Schema
-import com.google.firebase.ai.type.generationConfig
+import android.util.Log
+import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
+import okhttp3.FormBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * Print pagination plan describing how a post's topic sections should be grouped
- * so related headings, notes, tables, and MCQs stay together across print page breaks.
- */
-data class PrintTopicLayoutPlan(
-  val groupedTopicCount: Int,
-  val keepSectionsTogether: Boolean,
-  val preventOrphanHeadings: Boolean,
-  val maxUnbrokenBlockHeightPx: Int,
-  val topicTitles: List<String>,
-  val summaryMessage: String,
-  val isPlaceholder: Boolean = false,
-  val firebaseNotice: String? = null,
+private const val TAG = "TranslationRepository"
+
+data class TranslationLanguage(
+  val code: String,
+  val displayName: String,
+  val nativeName: String,
+)
+
+object TranslationLanguages {
+  val supported: List<TranslationLanguage> =
+    listOf(
+      TranslationLanguage("hi", "Hindi", "हिन्दी"),
+      TranslationLanguage("en", "English", "English"),
+      TranslationLanguage("bn", "Bengali", "বাংলা"),
+      TranslationLanguage("mr", "Marathi", "मराठी"),
+      TranslationLanguage("ta", "Tamil", "தமிழ்"),
+      TranslationLanguage("te", "Telugu", "తెలుగు"),
+      TranslationLanguage("gu", "Gujarati", "ગુજરાતી"),
+      TranslationLanguage("pa", "Punjabi", "ਪੰਜਾਬੀ"),
+      TranslationLanguage("ur", "Urdu", "اردو"),
+      TranslationLanguage("kn", "Kannada", "ಕನ್ನಡ"),
+      TranslationLanguage("ml", "Malayalam", "മലയാളം"),
+    )
+}
+
+data class TranslationResult(
+  val targetLanguage: TranslationLanguage,
+  val translatedTitle: String,
+  val translatedSegments: List<String>,
 )
 
 /**
- * Single AI boundary for cloud generative features.
+ * Standard, non-AI translation boundary for study posts.
  */
 interface AiRepository {
-  suspend fun planSmartPrintLayout(
-    postTitle: String,
-    rawHtml: String,
-  ): PrintTopicLayoutPlan
+  suspend fun translatePostSegments(
+    targetLanguage: TranslationLanguage,
+    title: String,
+    segments: List<String>,
+  ): TranslationResult
 }
 
 /**
- * Production implementation powered by Firebase AI Logic (`Firebase.ai`) using Gemini 3.8 Flash
- * with strict structured JSON output via [Schema.obj].
+ * Fast, parallel standard translation engine backed by direct HTTP translation endpoints.
+ * Completely independent of generative AI quotas/high demand and uses zero native C++ libraries.
  */
-class FirebaseAiRepository : AiRepository {
+class StandardTranslationRepository : AiRepository {
 
-  private val printLayoutSchema =
-    Schema.obj(
-      properties =
-        mapOf(
-          "groupedTopicCount" to
-            Schema.integer(
-              description = "Total number of distinct topics or sections detected in the study post."
-            ),
-          "keepSectionsTogether" to
-            Schema.boolean(
-              description =
-                "True when each topic heading and its notes, tables, or MCQs should stay together without splitting across print pages."
-            ),
-          "preventOrphanHeadings" to
-            Schema.boolean(
-              description =
-                "True when headings must stay attached to their opening content block so no heading sits alone at the bottom of a page."
-            ),
-          "maxUnbrokenBlockHeightPx" to
-            Schema.integer(
-              description =
-                "Recommended max height in CSS pixels (between 520 and 980) for keeping an individual topic group unbroken on a single A4 print page."
-            ),
-          "topicTitles" to
-            Schema.array(
-              items = Schema.string(),
-              description =
-                "Exact visible topic or subheading text lines from the post that begin each logical topic group."
-            ),
-          "summaryMessage" to
-            Schema.string(
-              description =
-                "Concise one-sentence summary explaining how Gemini organized the post's topics for printing."
-            ),
-        )
-    )
+  private val httpClient by lazy {
+    OkHttpClient.Builder()
+      .connectTimeout(12, TimeUnit.SECONDS)
+      .readTimeout(20, TimeUnit.SECONDS)
+      .writeTimeout(12, TimeUnit.SECONDS)
+      .build()
+  }
 
-  private val model by lazy {
-    Firebase.ai.generativeModel(
-      modelName = MODEL_NAME,
-      generationConfig =
-        generationConfig {
-          responseMimeType = "application/json"
-          responseSchema = printLayoutSchema
-        },
+  override suspend fun translatePostSegments(
+    targetLanguage: TranslationLanguage,
+    title: String,
+    segments: List<String>,
+  ): TranslationResult = withContext(Dispatchers.IO) {
+    val combinedInput = listOf(title) + segments
+    val batches = buildBatches(combinedInput, MAX_SEGMENTS_PER_CALL, MAX_CHARS_PER_CALL)
+
+    val translatedCombined =
+      coroutineScope {
+        batches.chunked(MAX_CONCURRENT_BATCHES).flatMap { group ->
+          group.map { batch ->
+            async { translateBatch(targetLanguage.code, batch) }
+          }.awaitAll().flatten()
+        }
+      }
+
+    val translatedTitle =
+      translatedCombined.firstOrNull()?.takeIf { it.isNotBlank() } ?: title
+    val translatedBody =
+      if (translatedCombined.size > 1) {
+        translatedCombined.drop(1)
+      } else {
+        emptyList()
+      }
+
+    // Guarantee exact 1:1 count alignment so DOM text nodes never shift
+    val alignedBody =
+      segments.indices.map { idx ->
+        translatedBody.getOrNull(idx)?.takeIf { it.isNotBlank() } ?: segments[idx]
+      }
+
+    TranslationResult(
+      targetLanguage = targetLanguage,
+      translatedTitle = translatedTitle,
+      translatedSegments = alignedBody,
     )
   }
 
-  override suspend fun planSmartPrintLayout(
-    postTitle: String,
-    rawHtml: String,
-  ): PrintTopicLayoutPlan {
-    val compactHtml = prepareCompactStructureForPrompt(rawHtml)
-    val prompt =
-      """
-      You are a print pagination layout assistant for an Indian CBSE student study notes app (GYAN PETIKA).
-      Analyze the study post HTML below and identify every logical topic/section boundary so that when printed to paper or PDF, related content on the same topic (heading + explanation + bullets + table + MCQ question/options/answer) stays together cleanly without awkward mid-topic page breaks or orphaned headings.
+  private suspend fun translateBatch(
+    targetCode: String,
+    batch: List<String>,
+  ): List<String> {
+    if (batch.isEmpty()) return emptyList()
 
-      Rules:
-      - Return exact visible topic titles from the post in `topicTitles` (up to 25 topics), including plain bold or styled <div>/<p> topic headings that do not use <h1>-<h4> tags.
-      - Choose `maxUnbrokenBlockHeightPx` between 520 and 980 based on how dense the topics are (e.g., 720-880 for medium study sections, 600-740 for long MCQ/table sections).
-      - Set `keepSectionsTogether` to true and `preventOrphanHeadings` to true.
-      - Keep `summaryMessage` concise (1 sentence, plain English) mentioning how many topic sections were grouped.
+    try {
+      return translateBatchPrimary(targetCode, batch)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (primaryErr: Exception) {
+      Log.w(TAG, "Primary standard translator failed; trying secondary endpoint", primaryErr)
+    }
 
-      Post Title: ${postTitle.ifBlank { "Study Notes" }}
+    try {
+      return translateBatchSecondary(targetCode, batch)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (secondaryErr: Exception) {
+      Log.w(TAG, "Secondary standard translator failed; trying MyMemory fallback", secondaryErr)
+    }
 
-      Post HTML Excerpt:
-      $compactHtml
-      """.trimIndent()
+    return translateBatchMyMemory(targetCode, batch)
+  }
 
-    val response = withTimeout(INFERENCE_TIMEOUT_MS) { model.generateContent(prompt) }
-    val jsonString =
-      response.text?.takeIf { it.isNotBlank() }
-        ?: throw IllegalStateException("Gemini returned an empty print layout response.")
+  private suspend fun translateBatchPrimary(
+    targetCode: String,
+    batch: List<String>,
+  ): List<String> {
+    val sanitized = batch.map { it.replace(INLINE_NEWLINE_REGEX, " ").trim().ifEmpty { it } }
+    val joined = sanitized.joinToString("\n")
+    val translatedJoined = requestGtxSingle(targetCode, joined)
+    val lines = translatedJoined.trimEnd('\n', '\r').split('\n')
 
-    // Direct JSON parsing guaranteed by responseMimeType = "application/json" and responseSchema.
-    val json = JSONObject(jsonString)
-    val topicTitlesArray = json.optJSONArray("topicTitles")
-    val topicTitles =
-      buildList {
-        if (topicTitlesArray != null) {
-          for (i in 0 until topicTitlesArray.length()) {
-            val item = topicTitlesArray.optString(i, "").trim()
-            if (item.length >= 2) add(item)
+    if (lines.size == sanitized.size) {
+      return lines.mapIndexed { idx, line ->
+        line.trim().ifBlank { batch[idx] }
+      }
+    }
+
+    // Fallback to concurrent single-item translation if line splitting differed
+    return coroutineScope {
+      sanitized.chunked(6).flatMap { chunk ->
+        chunk.map { item ->
+          async {
+            if (item.isBlank()) {
+              item
+            } else {
+              runCatching { requestGtxSingle(targetCode, item).trim() }
+                .getOrNull()
+                ?.takeIf { it.isNotBlank() } ?: item
+            }
+          }
+        }.awaitAll()
+      }
+    }
+  }
+
+  private suspend fun translateBatchSecondary(
+    targetCode: String,
+    batch: List<String>,
+  ): List<String> {
+    val sanitized = batch.map { it.replace(INLINE_NEWLINE_REGEX, " ").trim().ifEmpty { it } }
+    val joined = sanitized.joinToString("\n")
+    val translatedJoined = requestClients5Single(targetCode, joined)
+    val lines = translatedJoined.trimEnd('\n', '\r').split('\n')
+
+    if (lines.size == sanitized.size) {
+      return lines.mapIndexed { idx, line ->
+        line.trim().ifBlank { batch[idx] }
+      }
+    }
+
+    return coroutineScope {
+      sanitized.chunked(6).flatMap { chunk ->
+        chunk.map { item ->
+          async {
+            if (item.isBlank()) {
+              item
+            } else {
+              runCatching { requestClients5Single(targetCode, item).trim() }
+                .getOrNull()
+                ?.takeIf { it.isNotBlank() } ?: item
+            }
+          }
+        }.awaitAll()
+      }
+    }
+  }
+
+  private fun requestGtxSingle(
+    targetCode: String,
+    text: String,
+  ): String {
+    val encodedTl = URLEncoder.encode(targetCode, "UTF-8")
+    val url =
+      "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=$encodedTl&dt=t"
+    val formBody = FormBody.Builder().add("q", text).build()
+    val request =
+      Request.Builder()
+        .url(url)
+        .post(formBody)
+        .header("User-Agent", "Mozilla/5.0 (Android)")
+        .build()
+
+    httpClient.newCall(request).execute().use { response ->
+      val body = response.body?.string().orEmpty()
+      if (!response.isSuccessful || body.isBlank()) {
+        throw IllegalStateException("Translator HTTP ${response.code}")
+      }
+      val outer = JSONArray(body)
+      val sentences =
+        outer.optJSONArray(0)
+          ?: throw IllegalStateException("Unexpected translator response format")
+      val sb = StringBuilder()
+      for (i in 0 until sentences.length()) {
+        val segmentArr = sentences.optJSONArray(i) ?: continue
+        val piece = segmentArr.optString(0, "")
+        if (piece.isNotEmpty() && piece != "null") {
+          sb.append(piece)
+        }
+      }
+      return sb.toString().ifBlank {
+        throw IllegalStateException("Translator returned empty text")
+      }
+    }
+  }
+
+  private fun requestClients5Single(
+    targetCode: String,
+    text: String,
+  ): String {
+    val encodedTl = URLEncoder.encode(targetCode, "UTF-8")
+    val url =
+      "https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=$encodedTl"
+    val formBody = FormBody.Builder().add("q", text).build()
+    val request =
+      Request.Builder()
+        .url(url)
+        .post(formBody)
+        .header("User-Agent", "Mozilla/5.0 (Android)")
+        .build()
+
+    httpClient.newCall(request).execute().use { response ->
+      val body = response.body?.string().orEmpty()
+      if (!response.isSuccessful || body.isBlank()) {
+        throw IllegalStateException("Secondary translator HTTP ${response.code}")
+      }
+      val arr = JSONArray(body)
+      val first = arr.opt(0)
+      val translated =
+        when (first) {
+          is JSONArray -> first.optString(0, "")
+          is String -> first
+          else -> ""
+        }
+      return translated.ifBlank {
+        throw IllegalStateException("Secondary translator returned empty text")
+      }
+    }
+  }
+
+  private suspend fun translateBatchMyMemory(
+    targetCode: String,
+    batch: List<String>,
+  ): List<String> = coroutineScope {
+    val sampleText = batch.joinToString(" ").take(400)
+    val dominantSource = inferSourceLanguageCode(sampleText, targetCode)
+
+    batch.chunked(4).flatMap { chunk ->
+      chunk.map { item ->
+        async {
+          val trimmed = item.trim()
+          if (trimmed.length < 2) return@async item
+          val itemSource = inferSourceLanguageCode(trimmed, targetCode)
+          val sourceCode = if (itemSource == targetCode) dominantSource else itemSource
+          if (sourceCode == targetCode) return@async item
+
+          val encodedQ = URLEncoder.encode(trimmed.take(480), "UTF-8")
+          val langPair = URLEncoder.encode("$sourceCode|$targetCode", "UTF-8")
+          val url = "https://api.mymemory.translated.net/get?q=$encodedQ&langpair=$langPair"
+          val request = Request.Builder().url(url).get().build()
+
+          httpClient.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful || body.isBlank()) {
+              throw IllegalStateException("Backup translator HTTP ${response.code}")
+            }
+            val json = JSONObject(body)
+            val status = json.optInt("responseStatus", 0)
+            if (status != 200) {
+              throw IllegalStateException("Backup translator status $status")
+            }
+            val translated =
+              json.optJSONObject("responseData")?.optString("translatedText", "").orEmpty().trim()
+            translated.ifBlank { item }
           }
         }
-      }.distinct().take(25)
-
-    val rawCount = json.optInt("groupedTopicCount", topicTitles.size.coerceAtLeast(1))
-    val groupedTopicCount = maxOf(rawCount, topicTitles.size, 1)
-    val maxHeightPx = json.optInt("maxUnbrokenBlockHeightPx", 820).coerceIn(520, 980)
-    val keepTogether = json.optBoolean("keepSectionsTogether", true)
-    val preventOrphans = json.optBoolean("preventOrphanHeadings", true)
-    val summary =
-      json.optString("summaryMessage", "").trim().ifBlank {
-        "Adjusted print layout to keep $groupedTopicCount topic section${if (groupedTopicCount == 1) "" else "s"} together cleanly."
-      }
-
-    return PrintTopicLayoutPlan(
-      groupedTopicCount = groupedTopicCount,
-      keepSectionsTogether = keepTogether,
-      preventOrphanHeadings = preventOrphans,
-      maxUnbrokenBlockHeightPx = maxHeightPx,
-      topicTitles = topicTitles,
-      summaryMessage = summary,
-      isPlaceholder = false,
-      firebaseNotice = null,
-    )
-  }
-
-  private fun prepareCompactStructureForPrompt(rawHtml: String): String {
-    if (rawHtml.isBlank()) return ""
-    val stripped =
-      rawHtml
-        .replace(SCRIPT_OR_STYLE_REGEX, " ")
-        .replace(HTML_COMMENT_REGEX, " ")
-        .replace(INLINE_STYLE_ATTR_REGEX, "")
-        .replace(WHITESPACE_REGEX, " ")
-        .trim()
-    return if (stripped.length <= MAX_PROMPT_HTML_CHARS) {
-      stripped
-    } else {
-      stripped.take(MAX_PROMPT_HTML_CHARS)
+      }.awaitAll()
     }
   }
 
-  private companion object {
-    const val MODEL_NAME = "gemini-3.8-flash"
-    const val INFERENCE_TIMEOUT_MS = 60_000L
-    const val MAX_PROMPT_HTML_CHARS = 12_000
-    val SCRIPT_OR_STYLE_REGEX = Regex("(?is)<(?:script|style|svg|noscript)\\b[^>]*>.*?</(?:script|style|svg|noscript)>")
-    val HTML_COMMENT_REGEX = Regex("(?is)<!--.*?-->")
-    val INLINE_STYLE_ATTR_REGEX = Regex("(?i)\\sstyle\\s*=\\s*(?:\"[^\"]*\"|'[^']*')")
-    val WHITESPACE_REGEX = Regex("\\s+")
-  }
-}
+  private fun inferSourceLanguageCode(
+    text: String,
+    targetCode: String,
+  ): String {
+    var devanagari = 0
+    var bengali = 0
+    var tamil = 0
+    var telugu = 0
+    var gujarati = 0
+    var gurmukhi = 0
+    var malayalam = 0
+    var kannada = 0
+    var arabic = 0
+    var latin = 0
 
-/**
- * Deterministic test/offline stub kept for unit tests.
- * Production code uses [FirebaseAiRepository].
- */
-class PlaceholderAiRepository : AiRepository {
-
-  override suspend fun planSmartPrintLayout(
-    postTitle: String,
-    rawHtml: String,
-  ): PrintTopicLayoutPlan =
-    withContext(Dispatchers.Default) {
-      val detectedTopics = extractTopicHeadings(rawHtml)
-      val sectionTagCount = SECTION_BLOCK_REGEX.findAll(rawHtml).count()
-      val groupedCount = maxOf(detectedTopics.size, sectionTagCount, 1)
-
-      val sampleTopics =
-        if (detectedTopics.isNotEmpty()) {
-          detectedTopics.take(6)
-        } else {
-          listOf(postTitle.ifBlank { "Post Content" })
-        }
-
-      PrintTopicLayoutPlan(
-        groupedTopicCount = groupedCount,
-        keepSectionsTogether = true,
-        preventOrphanHeadings = true,
-        maxUnbrokenBlockHeightPx = 860,
-        topicTitles = sampleTopics,
-        summaryMessage =
-          "Sample AI print layout ready: keeping $groupedCount topic section${if (groupedCount == 1) "" else "s"} together on print pages.",
-        isPlaceholder = true,
-        firebaseNotice =
-          "AI features require Firebase. Using sample placeholder layout adjustment until Firebase AI Logic is enabled.",
-      )
+    for (ch in text) {
+      when (ch.code) {
+        in 0x0900..0x097F -> devanagari++
+        in 0x0980..0x09FF -> bengali++
+        in 0x0B80..0x0BFF -> tamil++
+        in 0x0C00..0x0C7F -> telugu++
+        in 0x0A80..0x0AFF -> gujarati++
+        in 0x0A00..0x0A7F -> gurmukhi++
+        in 0x0D00..0x0D7F -> malayalam++
+        in 0x0C80..0x0CFF -> kannada++
+        in 0x0600..0x06FF -> arabic++
+        in 'A'.code..'Z'.code, in 'a'.code..'z'.code -> latin++
+      }
     }
 
-  private fun extractTopicHeadings(html: String): List<String> {
-    if (html.isBlank()) return emptyList()
-    return HEADING_TAG_REGEX
-      .findAll(html)
-      .map { match ->
-        val rawInner = match.groupValues.getOrNull(1).orEmpty()
-        HtmlCompat.fromHtml(rawInner, HtmlCompat.FROM_HTML_MODE_LEGACY)
-          .toString()
-          .replace('\u00A0', ' ')
-          .replace(Regex("\\s+"), " ")
-          .trim()
+    val best =
+      listOf(
+        "hi" to devanagari,
+        "bn" to bengali,
+        "ta" to tamil,
+        "te" to telugu,
+        "gu" to gujarati,
+        "pa" to gurmukhi,
+        "ml" to malayalam,
+        "kn" to kannada,
+        "ur" to arabic,
+        "en" to latin,
+      ).maxByOrNull { it.second }
+
+    if (best != null && best.second > 0) return best.first
+    return if (targetCode == "en") "hi" else "en"
+  }
+
+  private fun buildBatches(
+    items: List<String>,
+    maxSegments: Int,
+    maxChars: Int,
+  ): List<List<String>> {
+    if (items.isEmpty()) return emptyList()
+    val batches = mutableListOf<List<String>>()
+    var current = mutableListOf<String>()
+    var currentChars = 0
+
+    for (item in items) {
+      val itemLen = item.length
+      if (
+        current.isNotEmpty() &&
+          (current.size >= maxSegments || currentChars + itemLen > maxChars)
+      ) {
+        batches.add(current)
+        current = mutableListOf()
+        currentChars = 0
       }
-      .filter { it.length >= 2 }
-      .distinct()
-      .toList()
+      current.add(item)
+      currentChars += itemLen
+    }
+    if (current.isNotEmpty()) {
+      batches.add(current)
+    }
+    return batches
   }
 
   private companion object {
-    val HEADING_TAG_REGEX = Regex("(?is)<h[1-4]\\b[^>]*>(.*?)</h[1-4]>")
-    val SECTION_BLOCK_REGEX =
-      Regex("(?is)<(?:section|article)\\b|class=[\"'][^\"']*(?:gp-section|topic|card|q-card|question)[^\"']*[\"']")
+    const val MAX_SEGMENTS_PER_CALL = 20
+    const val MAX_CHARS_PER_CALL = 1_600
+    const val MAX_CONCURRENT_BATCHES = 4
+    val INLINE_NEWLINE_REGEX = Regex("\\s*\\r?\\n+\\s*")
   }
 }

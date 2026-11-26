@@ -62,8 +62,10 @@ object BundledContent {
       SubjectItem("science", "Science", SubjectAccent.GREEN),
       SubjectItem("english", "English", SubjectAccent.RED),
       SubjectItem("hindi", "Hindi", SubjectAccent.ORANGE),
+      SubjectItem("sanskrit", "Sanskrit", SubjectAccent.ORANGE),
       SubjectItem("social-science", "Social Science", SubjectAccent.PURPLE),
       SubjectItem("information-technology", "Information Technology", SubjectAccent.TEAL),
+      SubjectItem("computer-science", "Computer Science", SubjectAccent.BLUE),
     )
 
   val seniorSubjects =
@@ -82,6 +84,7 @@ object BundledContent {
       SubjectItem("sociology", "Sociology", SubjectAccent.BLUE),
       SubjectItem("english", "English", SubjectAccent.RED),
       SubjectItem("information-technology", "Information Technology", SubjectAccent.TEAL),
+      SubjectItem("computer-science", "Computer Science", SubjectAccent.BLUE),
     )
 
   fun subjectsForClass(className: String): List<SubjectItem> =

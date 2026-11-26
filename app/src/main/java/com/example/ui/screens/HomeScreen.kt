@@ -36,6 +36,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -76,6 +81,13 @@ fun HomeScreen(
   val extended = LocalGyanExtendedColors.current
   val filteredPosts = uiState.recentFilteredPosts
   val isHomeOverview = uiState.selectedClassFilter == "All"
+  var currentTimeMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+  LaunchedEffect(uiState.posts, uiState.preferences.lastSyncEpochMs) {
+    currentTimeMs = System.currentTimeMillis()
+  }
+
+  val lastDayNotices = remember(uiState.posts, currentTimeMs) { uiState.lastDayNotices(currentTimeMs) }
 
   BackHandler(enabled = !isHomeOverview) {
     onSelectClassPill("All")
@@ -184,6 +196,7 @@ fun HomeScreen(
       item {
         HomeNoticeSection(
           allNotices = uiState.noticePosts,
+          newNoticesCount = lastDayNotices.size,
           onOpenNotice = onOpenPost,
           onViewAllClick = onViewAllNoticesClick,
           modifier = Modifier.padding(horizontal = 16.dp),
@@ -316,6 +329,7 @@ fun HomeScreen(
 @Composable
 private fun HomeNoticeSection(
   allNotices: List<StudyPost>,
+  newNoticesCount: Int,
   onOpenNotice: (StudyPost) -> Unit,
   onViewAllClick: () -> Unit,
   modifier: Modifier = Modifier,
@@ -355,9 +369,10 @@ private fun HomeNoticeSection(
         Surface(
           shape = RoundedCornerShape(999.dp),
           color = Color(0xFFEA580C).copy(alpha = 0.12f),
+          modifier = Modifier.testTag("home_notice_count_badge"),
         ) {
           Text(
-            text = "${allNotices.size} Notices",
+            text = "$newNoticesCount New",
             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
             color = Color(0xFFEA580C),
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),

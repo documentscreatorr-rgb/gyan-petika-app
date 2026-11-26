@@ -23,14 +23,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
+import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.AccountBalance
 import androidx.compose.material.icons.rounded.Biotech
 import androidx.compose.material.icons.rounded.Book
 import androidx.compose.material.icons.rounded.Calculate
+import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Science
-import androidx.compose.material.icons.rounded.TrendingUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -174,10 +175,11 @@ private fun iconForSubject(id: String): ImageVector =
     "science", "chemistry" -> Icons.Rounded.Science
     "biology" -> Icons.Rounded.Biotech
     "english" -> Icons.AutoMirrored.Rounded.MenuBook
-    "hindi" -> Icons.Rounded.Book
+    "hindi", "sanskrit" -> Icons.Rounded.Book
     "social-science", "geography", "political-science" -> Icons.Rounded.Public
+    "computer-science" -> Icons.Rounded.Code
     "information-technology", "physics" -> Icons.Rounded.Computer
-    "economics", "accountancy", "business-studies" -> Icons.Rounded.TrendingUp
+    "economics", "accountancy", "business-studies" -> Icons.AutoMirrored.Rounded.TrendingUp
     "history" -> Icons.Rounded.AccountBalance
     else -> Icons.AutoMirrored.Rounded.MenuBook
   }
